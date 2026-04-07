@@ -1,30 +1,110 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
     function isAuthenticated() {
       return request.auth != null;
     }
-    
-    match /team/{teamId} {
-      allow read, write: if isAuthenticated();
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
     }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidString(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+             request.resource.data[field].size() >= minLen &&
+             request.resource.data[field].size() <= maxLen;
+    }
+
+    function isValidNumber(field, min, max) {
+      return request.resource.data[field] is number &&
+             request.resource.data[field] >= min &&
+             request.resource.data[field] <= max;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidPlayer() {
+      return hasRequiredFields(['firstName', 'lastName', 'number', 'position']) &&
+             isValidString('firstName', 1, 50) &&
+             isValidString('lastName', 1, 50) &&
+             isValidNumber('number', 1, 99) &&
+             request.resource.data.position in ['Portero', 'Defensa', 'Medio', 'Delantero'];
+    }
+
+    function isValidSeason() {
+      return hasRequiredFields(['name']) &&
+             isValidString('name', 1, 50);
+    }
+
+    function isValidOpponent() {
+      return hasRequiredFields(['name']) &&
+             isValidString('name', 1, 100);
+    }
+
+    function isValidMatch() {
+      return hasRequiredFields(['seasonId', 'date', 'opponentId', 'status']) &&
+             isValidString('seasonId', 1, 100) &&
+             isValidString('opponentId', 1, 100) &&
+             request.resource.data.status in ['scheduled', 'completed'];
+    }
+
+    function isValidPlayerStat() {
+      return hasRequiredFields(['playerId', 'matchId', 'seasonId', 'attendance']) &&
+             isValidString('playerId', 1, 100) &&
+             isValidString('matchId', 1, 100) &&
+             isValidString('seasonId', 1, 100) &&
+             request.resource.data.attendance in ['attending', 'notAttending', 'noResponse'];
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
     match /players/{playerId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidPlayer();
+      allow delete: if isAuthenticated();
     }
+
     match /seasons/{seasonId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidSeason();
+      allow delete: if isAuthenticated();
     }
+
     match /opponents/{opponentId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidOpponent();
+      allow delete: if isAuthenticated();
     }
+
     match /matches/{matchId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidMatch();
+      allow delete: if isAuthenticated();
     }
+
     match /playerStats/{statId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidPlayerStat();
+      allow delete: if isAuthenticated();
     }
+
     match /lineups/{lineupId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
     }
   }
 }

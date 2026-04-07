@@ -1,0 +1,212 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { 
+  collection, 
+  addDoc, 
+  onSnapshot 
+} from 'firebase/firestore';
+import { db } from '../firebase';
+import { Season, Opponent, MatchType, Match } from '../types';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
+import { ArrowLeft, Calendar, Save } from 'lucide-react';
+import { motion } from 'motion/react';
+
+interface AddMatchProps {
+  seasons: Season[];
+  opponents: Opponent[];
+  onAddMatch: (match: Omit<Match, 'id'>) => Promise<any>;
+}
+
+export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchProps) {
+  const navigate = useNavigate();
+
+  const [seasonId, setSeasonId] = useState<string>('');
+  const [opponentId, setOpponentId] = useState<string>('');
+  const [type, setType] = useState<MatchType>('friendly');
+  const [isHome, setIsHome] = useState<string>('true');
+  const [round, setRound] = useState<string>('');
+  const [date, setDate] = useState<string>('');
+
+  useEffect(() => {
+    if (seasons.length > 0 && !seasonId) {
+      const currentYear = new Date().getFullYear().toString();
+      const currentSeason = seasons.find(s => s.name.includes(currentYear))?.id || seasons[0].id;
+      setSeasonId(currentSeason);
+    }
+  }, [seasons, seasonId]);
+
+  useEffect(() => {
+    if (opponents.length > 0 && !opponentId) {
+      setOpponentId(opponents[0].id);
+    }
+  }, [opponents, opponentId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!seasonId || !opponentId || !date) return;
+
+    try {
+      const matchData: Omit<Match, 'id'> = {
+        seasonId,
+        opponentId,
+        date,
+        status: 'scheduled',
+        type,
+        isHome: isHome === 'true',
+      };
+      
+      if (round) {
+        matchData.round = round;
+      }
+
+      await onAddMatch(matchData);
+      navigate('/matches');
+    } catch (error) {
+      console.error("Error creating match:", error);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F5F5F0] pb-20">
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <Button 
+          variant="ghost" 
+          onClick={() => navigate('/matches')}
+          className="mb-6 hover:bg-white rounded-xl"
+        >
+          <ArrowLeft size={18} className="mr-2" />
+          Volver a Partidos
+        </Button>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <Card className="border-none shadow-xl rounded-3xl overflow-hidden">
+            <CardHeader className="bg-emerald-600 p-8 text-white">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
+                  <Calendar size={24} />
+                </div>
+                <div>
+                  <CardTitle className="text-2xl font-black">Programar Partido</CardTitle>
+                  <CardDescription className="text-emerald-100">Añade un nuevo encuentro al calendario de tu equipo.</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-8">
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Temporada</Label>
+                    <Select value={seasonId} onValueChange={setSeasonId} required>
+                      <SelectTrigger className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500">
+                        <SelectValue placeholder="Selecciona temporada" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-none shadow-2xl">
+                        {seasons.map((s) => (
+                          <SelectItem key={s.id} value={s.id} label={s.name}>
+                            {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Rival</Label>
+                    <Select value={opponentId} onValueChange={setOpponentId} required>
+                      <SelectTrigger className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500">
+                        <SelectValue placeholder="Selecciona rival" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-none shadow-2xl">
+                        {opponents.map((o) => (
+                          <SelectItem key={o.id} value={o.id} label={o.name}>
+                            {o.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Tipo de Partido</Label>
+                    <Select value={type} onValueChange={(v: MatchType) => setType(v)} required>
+                      <SelectTrigger className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500">
+                        <SelectValue placeholder="Selecciona tipo" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-none shadow-2xl">
+                        <SelectItem value="friendly" label="Amistoso">Amistoso</SelectItem>
+                        <SelectItem value="league" label="Liga">Liga</SelectItem>
+                        <SelectItem value="cup" label="Copa">Copa</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Condición</Label>
+                    <Select value={isHome} onValueChange={setIsHome} required>
+                      <SelectTrigger className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500">
+                        <SelectValue placeholder="Selecciona condición" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl border-none shadow-2xl">
+                        <SelectItem value="true" label="Local">Local</SelectItem>
+                        <SelectItem value="false" label="Visitante">Visitante</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {(type === 'league' || type === 'cup') && (
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-gray-400 uppercase ml-1">
+                        {type === 'league' ? 'Jornada' : 'Ronda'}
+                      </Label>
+                      <Input 
+                        value={round}
+                        onChange={(e) => setRound(e.target.value)}
+                        placeholder={type === 'league' ? "Ej: Jornada 5" : "Ej: Cuartos de Final"}
+                        required 
+                        className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
+                      />
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Fecha y Hora</Label>
+                    <Input 
+                      type="datetime-local" 
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      required 
+                      className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-6">
+                  <Button 
+                    type="submit" 
+                    className="w-full h-14 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold text-lg shadow-lg shadow-emerald-100 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                  >
+                    <Save className="mr-2" size={20} />
+                    Crear Partido
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
+    </div>
+  );
+}

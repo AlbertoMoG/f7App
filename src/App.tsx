@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { 
   collection, 
   onSnapshot, 
@@ -27,6 +28,8 @@ import MatchList from './components/MatchList';
 import LineupSimulator from './components/LineupSimulator';
 import SeasonManager from './components/SeasonManager';
 import TeamSettings from './components/TeamSettings';
+import MatchStats from './pages/MatchStats';
+import AddMatch from './pages/AddMatch';
 import { Button } from '@/components/ui/button';
 import { Trophy, LogIn } from 'lucide-react';
 
@@ -177,71 +180,85 @@ export default function App() {
   }
 
   return (
-    <Layout 
-      activeTab={activeTab} 
-      setActiveTab={setActiveTab} 
-      user={user} 
-      team={team}
-      onLogout={handleLogout}
-    >
-      {activeTab === 'dashboard' && (
-        <Dashboard 
-          players={players} 
-          matches={matches} 
-          stats={stats} 
-          opponents={opponents} 
-        />
-      )}
-      {activeTab === 'players' && (
-        <PlayerList 
-          players={players} 
-          stats={stats}
-          seasons={seasons}
-          onAddPlayer={addPlayer} 
-          onUpdatePlayer={updatePlayer} 
-          onDeletePlayer={deletePlayer} 
-        />
-      )}
-      {activeTab === 'matches' && (
-        <MatchList 
-          team={team}
-          players={players} 
-          matches={matches} 
-          stats={stats} 
-          seasons={seasons} 
-          opponents={opponents} 
-          onAddMatch={addMatch} 
-          onUpdateMatch={updateMatch} 
-          onDeleteMatch={deleteMatch} 
-          onUpdateStats={updateStats}
-        />
-      )}
-      {activeTab === 'simulator' && (
-        <LineupSimulator 
-          players={players} 
-          lineups={lineups} 
-          onSaveLineup={saveLineup} 
-          onDeleteLineup={deleteLineup} 
-        />
-      )}
-      {activeTab === 'seasons' && (
-        <SeasonManager 
-          seasons={seasons} 
-          opponents={opponents} 
-          onAddSeason={addSeason} 
-          onAddOpponent={addOpponent} 
-          onDeleteSeason={deleteSeason} 
-          onDeleteOpponent={deleteOpponent} 
-        />
-      )}
-      {activeTab === 'team' && (
-        <TeamSettings 
-          team={team}
-          onSaveTeam={saveTeam}
-          onUpdateTeam={updateTeam}
-        />
-      )}
-    </Layout>
+    <Router>
+      <Routes>
+        <Route path="/" element={
+          <Layout 
+            activeTab={activeTab} 
+            setActiveTab={setActiveTab} 
+            user={user} 
+            team={team}
+            onLogout={handleLogout}
+          >
+            {activeTab === 'dashboard' && (
+              <Dashboard 
+                players={players} 
+                matches={matches} 
+                stats={stats} 
+                opponents={opponents} 
+              />
+            )}
+            {activeTab === 'players' && (
+              <PlayerList 
+                players={players} 
+                stats={stats}
+                seasons={seasons}
+                onAddPlayer={addPlayer} 
+                onUpdatePlayer={updatePlayer} 
+                onDeletePlayer={deletePlayer} 
+              />
+            )}
+            {activeTab === 'matches' && (
+              <MatchList 
+                team={team}
+                players={players} 
+                matches={matches} 
+                stats={stats} 
+                seasons={seasons} 
+                opponents={opponents} 
+                onUpdateMatch={updateMatch} 
+                onDeleteMatch={deleteMatch} 
+                onUpdateStats={updateStats}
+              />
+            )}
+            {activeTab === 'simulator' && (
+              <LineupSimulator 
+                players={players} 
+                lineups={lineups} 
+                onSaveLineup={saveLineup} 
+                onDeleteLineup={deleteLineup} 
+              />
+            )}
+            {activeTab === 'seasons' && (
+              <SeasonManager 
+                seasons={seasons} 
+                opponents={opponents} 
+                onAddSeason={addSeason} 
+                onAddOpponent={addOpponent} 
+                onDeleteSeason={deleteSeason} 
+                onDeleteOpponent={deleteOpponent} 
+              />
+            )}
+            {activeTab === 'team' && (
+              <TeamSettings 
+                team={team}
+                onSaveTeam={saveTeam}
+                onUpdateTeam={updateTeam}
+              />
+            )}
+          </Layout>
+        } />
+        <Route path="/matches/:matchId/stats" element={<MatchStats />} />
+        <Route path="/matches/new" element={
+          <AddMatch 
+            seasons={seasons} 
+            opponents={opponents} 
+            onAddMatch={addMatch} 
+          />
+        } />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Router>
   );
 }
 

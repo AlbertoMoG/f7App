@@ -1,33 +1,15 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   Plus, 
   Calendar, 
-  Search, 
-  Filter, 
-  ChevronRight,
-  Trophy,
-  Users,
-  ShieldAlert,
-  Edit2,
-  Trash2,
-  MoreVertical,
-  CheckCircle2,
-  Clock,
-  ArrowRight,
+  Edit2, 
+  Trash2, 
+  Clock, 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogTrigger,
-  DialogFooter,
-  DialogDescription
-} from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { 
   Select, 
@@ -36,18 +18,10 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from '@/components/ui/table';
-import { Player, Match, PlayerStat, Season, Opponent, Attendance, MatchType, Team } from '../types';
+import { Player, Match, PlayerStat, Season, Opponent, MatchType, Team } from '../types';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 
 interface MatchListProps {
@@ -57,7 +31,6 @@ interface MatchListProps {
   stats: PlayerStat[];
   seasons: Season[];
   opponents: Opponent[];
-  onAddMatch: (match: Omit<Match, 'id'>) => void;
   onUpdateMatch: (match: Match) => void;
   onDeleteMatch: (id: string) => void;
   onUpdateStats: (stats: PlayerStat[]) => void;
@@ -74,44 +47,14 @@ export default function MatchList({
   stats, 
   seasons, 
   opponents, 
-  onAddMatch, 
   onUpdateMatch, 
   onDeleteMatch,
   onUpdateStats
 }: MatchListProps) {
-  const [isAddDialogOpen, setIsAddDialogOpen] = React.useState(false);
-  const [selectedMatch, setSelectedMatch] = React.useState<Match | null>(null);
+  const navigate = useNavigate();
   const [filterOpponent, setFilterOpponent] = React.useState<string>('all');
   const [filterSeason, setFilterSeason] = React.useState<string>('all');
-
   const [filterType, setFilterType] = React.useState<string>('all');
-  const [newMatchType, setNewMatchType] = React.useState<MatchType>('friendly');
-  const [newMatchSeason, setNewMatchSeason] = React.useState<string>('');
-  const [newMatchOpponent, setNewMatchOpponent] = React.useState<string>('');
-  const [newMatchIsHome, setNewMatchIsHome] = React.useState<string>('true');
-
-  // Reset state when dialog opens/closes
-  const handleOpenChange = (open: boolean) => {
-    setIsAddDialogOpen(open);
-    if (open) {
-      // Initialize with defaults if not set
-      const currentYear = new Date().getFullYear().toString();
-      const currentSeason = seasons.find(s => s.name.includes(currentYear))?.id || (seasons.length > 0 ? seasons[0].id : '');
-      setNewMatchSeason(currentSeason);
-      
-      const firstOpponent = opponents.length > 0 ? opponents[0].id : '';
-      setNewMatchOpponent(firstOpponent);
-      
-      setNewMatchType('friendly');
-      setNewMatchIsHome('true');
-    } else {
-      // Clear state when closing
-      setNewMatchSeason('');
-      setNewMatchOpponent('');
-      setNewMatchType('friendly');
-      setNewMatchIsHome('true');
-    }
-  };
 
   // Filtrar y ordenar partidos por fecha descendente
   const filteredMatches = matches.filter(m => {
@@ -121,57 +64,6 @@ export default function MatchList({
     return matchOpponent && matchSeason && matchTypeFilter;
   }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  /**
-   * Maneja la creación de un nuevo partido desde el formulario.
-   */
-  const handleAddMatch = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const round = formData.get('round') as string;
-    const matchData: Omit<Match, 'id'> = {
-      seasonId: newMatchSeason,
-      opponentId: newMatchOpponent,
-      date: formData.get('date') as string,
-      status: 'scheduled',
-      type: newMatchType,
-      isHome: newMatchIsHome === 'true',
-    };
-    if (round) {
-      matchData.round = round;
-    }
-    onAddMatch(matchData);
-    handleOpenChange(false);
-  };
-
-  const handleUpdateStats = (matchId: string, playerStats: Record<string, Partial<PlayerStat>>) => {
-    const match = matches.find(m => m.id === matchId);
-    if (!match) return;
-
-    const updatedStats: PlayerStat[] = players.map(p => {
-      const existing = stats.find(s => s.matchId === matchId && s.playerId === p.id);
-      const updates = playerStats[p.id] || {};
-      
-      return {
-        id: existing?.id || '',
-        playerId: p.id,
-        matchId: matchId,
-        seasonId: match.seasonId,
-        attendance: (updates.attendance as Attendance) || existing?.attendance || 'noResponse',
-        goals: updates.goals ?? existing?.goals ?? 0,
-        assists: updates.assists ?? existing?.assists ?? 0,
-        yellowCards: updates.yellowCards ?? existing?.yellowCards ?? 0,
-        redCards: updates.redCards ?? existing?.redCards ?? 0,
-      };
-    });
-
-    onUpdateStats(updatedStats);
-    
-    // Also update match score if provided
-    const scoreTeam = Object.values(playerStats).reduce((acc, s) => acc + (s.goals || 0), 0);
-    // For simplicity, we might want a separate input for opponent score
-    // Let's assume the user provides it in the dialog
-  };
-
   return (
     <div className="space-y-6">
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -179,97 +71,13 @@ export default function MatchList({
           <h2 className="text-3xl font-bold tracking-tight">Historial de Partidos</h2>
           <p className="text-gray-500">Registra resultados y estadísticas individuales.</p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={handleOpenChange}>
-          <DialogTrigger render={<Button className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl h-11 px-6" />}>
-            <Plus size={18} className="mr-2" />
-            Programar Partido
-          </DialogTrigger>
-          <DialogContent className="rounded-2xl">
-            <DialogHeader>
-              <DialogTitle>Nuevo Partido</DialogTitle>
-              <DialogDescription>Añade un nuevo encuentro al calendario.</DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleAddMatch} className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Temporada</Label>
-                <Select value={newMatchSeason} onValueChange={setNewMatchSeason}>
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="Selecciona temporada" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {seasons.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Rival</Label>
-                <Select value={newMatchOpponent} onValueChange={setNewMatchOpponent}>
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="Selecciona rival" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {opponents.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Tipo de Partido</Label>
-                <Select value={newMatchType} onValueChange={(v: MatchType) => setNewMatchType(v)} required>
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="Selecciona tipo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="friendly" label="Amistoso">Amistoso</SelectItem>
-                    <SelectItem value="league" label="Liga">Liga</SelectItem>
-                    <SelectItem value="cup" label="Copa">Copa</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Condición</Label>
-                <Select value={newMatchIsHome} onValueChange={setNewMatchIsHome} required>
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="Selecciona condición" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="true" label="Local">Local</SelectItem>
-                    <SelectItem value="false" label="Visitante">Visitante</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {newMatchType === 'league' && (
-                <div className="space-y-2">
-                  <Label>Jornada</Label>
-                  <Input name="round" placeholder="Ej: Jornada 5" required className="rounded-xl" />
-                </div>
-              )}
-              {newMatchType === 'cup' && (
-                <div className="space-y-2">
-                  <Label>Ronda</Label>
-                  <Input name="round" placeholder="Ej: Cuartos de Final" required className="rounded-xl" />
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label>Fecha y Hora</Label>
-                <Input name="date" type="datetime-local" required className="rounded-xl" />
-              </div>
-              <DialogFooter>
-                <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl">
-                  Crear Partido
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <Button 
+          onClick={() => navigate('/matches/new')}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl h-11 px-6"
+        >
+          <Plus size={18} className="mr-2" />
+          Programar Partido
+        </Button>
       </header>
 
       {/* Filters */}
@@ -430,20 +238,14 @@ export default function MatchList({
                       </div>
 
                       <div className="flex gap-2">
-                        <Dialog>
-                          <DialogTrigger render={<Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-emerald-50 hover:text-emerald-600" />}>
-                            <Edit2 size={18} />
-                          </DialogTrigger>
-                          <MatchStatsDialog 
-                            match={match} 
-                            players={players} 
-                            stats={stats} 
-                            onSave={(m, s) => {
-                              onUpdateMatch(m);
-                              onUpdateStats(s);
-                            }}
-                          />
-                        </Dialog>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => navigate(`/matches/${match.id}/stats`)}
+                          className="h-10 w-10 rounded-xl hover:bg-emerald-50 hover:text-emerald-600"
+                        >
+                          <Edit2 size={18} />
+                        </Button>
                         <Button variant="ghost" size="icon" onClick={() => onDeleteMatch(match.id)} className="h-10 w-10 rounded-xl hover:bg-red-50 hover:text-red-500">
                           <Trash2 size={18} />
                         </Button>
@@ -463,180 +265,5 @@ export default function MatchList({
         )}
       </div>
     </div>
-  );
-}
-
-function MatchStatsDialog({ match, players, stats, onSave }: { 
-  match: Match, 
-  players: Player[], 
-  stats: PlayerStat[],
-  onSave: (match: Match, stats: PlayerStat[]) => void 
-}) {
-  const [matchData, setMatchData] = React.useState<Match>(match);
-  const [localStats, setLocalStats] = React.useState<Record<string, Partial<PlayerStat>>>(
-    players.reduce((acc, p) => {
-      const s = stats.find(stat => stat.matchId === match.id && stat.playerId === p.id);
-      acc[p.id] = s ? { ...s } : { attendance: 'noResponse', goals: 0, assists: 0, yellowCards: 0, redCards: 0 };
-      return acc;
-    }, {} as Record<string, Partial<PlayerStat>>)
-  );
-
-  const updatePlayerStat = (playerId: string, field: keyof PlayerStat, value: any) => {
-    setLocalStats(prev => ({
-      ...prev,
-      [playerId]: { ...prev[playerId], [field]: value }
-    }));
-  };
-
-  const handleSave = () => {
-    const finalStats: PlayerStat[] = players.map(p => ({
-      id: (stats.find(s => s.matchId === match.id && s.playerId === p.id)?.id) || '',
-      playerId: p.id,
-      matchId: match.id,
-      seasonId: match.seasonId,
-      attendance: (localStats[p.id].attendance as Attendance) || 'noResponse',
-      goals: localStats[p.id].goals || 0,
-      assists: localStats[p.id].assists || 0,
-      yellowCards: localStats[p.id].yellowCards || 0,
-      redCards: localStats[p.id].redCards || 0,
-    }));
-
-    // Auto-calculate team score from goals
-    const teamScore = finalStats.reduce((acc, s) => acc + s.goals, 0);
-    
-    onSave({ ...matchData, scoreTeam: teamScore, status: 'completed' }, finalStats);
-  };
-
-  return (
-    <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl">
-      <DialogHeader>
-        <DialogTitle>Estadísticas del Partido</DialogTitle>
-        <DialogDescription>Registra el resultado final y el desempeño de cada jugador.</DialogDescription>
-      </DialogHeader>
-
-      <div className="space-y-8 py-4">
-        {/* Score Board */}
-        <div className="flex items-center justify-center gap-8 p-6 bg-gray-50 rounded-2xl">
-          <div className="text-center">
-            <p className="text-xs font-bold text-gray-500 uppercase mb-2">
-              {match.isHome !== false ? 'Mi Equipo' : 'Rival'}
-            </p>
-            {match.isHome !== false ? (
-              <div className="text-4xl font-black bg-white w-16 h-16 flex items-center justify-center rounded-xl shadow-sm">
-                {Object.values(localStats).reduce((acc, s) => acc + ((s as any).goals || 0), 0)}
-              </div>
-            ) : (
-              <Input 
-                type="number" 
-                value={matchData.scoreOpponent || 0} 
-                onChange={(e) => setMatchData({ ...matchData, scoreOpponent: parseInt(e.target.value) || 0 })}
-                className="text-4xl font-black w-16 h-16 text-center rounded-xl shadow-sm border-none bg-white"
-              />
-            )}
-          </div>
-          <div className="text-2xl font-bold text-gray-300">VS</div>
-          <div className="text-center">
-            <p className="text-xs font-bold text-gray-500 uppercase mb-2">
-              {match.isHome !== false ? 'Rival' : 'Mi Equipo'}
-            </p>
-            {match.isHome !== false ? (
-              <Input 
-                type="number" 
-                value={matchData.scoreOpponent || 0} 
-                onChange={(e) => setMatchData({ ...matchData, scoreOpponent: parseInt(e.target.value) || 0 })}
-                className="text-4xl font-black w-16 h-16 text-center rounded-xl shadow-sm border-none bg-white"
-              />
-            ) : (
-              <div className="text-4xl font-black bg-white w-16 h-16 flex items-center justify-center rounded-xl shadow-sm">
-                {Object.values(localStats).reduce((acc, s) => acc + ((s as any).goals || 0), 0)}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Player Stats Table */}
-        <div className="rounded-2xl border border-gray-100 overflow-hidden">
-          <Table>
-            <TableHeader className="bg-gray-50">
-              <TableRow>
-                <TableHead className="w-[200px]">Jugador</TableHead>
-                <TableHead>Asistencia</TableHead>
-                <TableHead className="text-center">Goles</TableHead>
-                <TableHead className="text-center">Asist.</TableHead>
-                <TableHead className="text-center">Amarillas</TableHead>
-                <TableHead className="text-center">Rojas</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {players.map(player => (
-                <TableRow key={player.id}>
-                  <TableCell className="font-bold">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] bg-emerald-100 text-emerald-700 w-5 h-5 flex items-center justify-center rounded-full">
-                        {player.number}
-                      </span>
-                      {player.firstName} {player.lastName}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Select 
-                      value={localStats[player.id].attendance} 
-                      onValueChange={(v) => updatePlayerStat(player.id, 'attendance', v)}
-                    >
-                      <SelectTrigger className="h-8 border-none bg-gray-50 rounded-lg text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="attending" label="Asiste">Asiste</SelectItem>
-                        <SelectItem value="notAttending" label="No asiste">No asiste</SelectItem>
-                        <SelectItem value="noResponse" label="Sin rpta">Sin rpta</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell>
-                    <Input 
-                      type="number" 
-                      className="h-8 w-12 mx-auto text-center border-none bg-gray-50 rounded-lg"
-                      value={localStats[player.id].goals}
-                      onChange={(e) => updatePlayerStat(player.id, 'goals', parseInt(e.target.value) || 0)}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Input 
-                      type="number" 
-                      className="h-8 w-12 mx-auto text-center border-none bg-gray-50 rounded-lg"
-                      value={localStats[player.id].assists}
-                      onChange={(e) => updatePlayerStat(player.id, 'assists', parseInt(e.target.value) || 0)}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Input 
-                      type="number" 
-                      className="h-8 w-12 mx-auto text-center border-none bg-gray-50 rounded-lg"
-                      value={localStats[player.id].yellowCards}
-                      onChange={(e) => updatePlayerStat(player.id, 'yellowCards', parseInt(e.target.value) || 0)}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Input 
-                      type="number" 
-                      className="h-8 w-12 mx-auto text-center border-none bg-gray-50 rounded-lg"
-                      value={localStats[player.id].redCards}
-                      onChange={(e) => updatePlayerStat(player.id, 'redCards', parseInt(e.target.value) || 0)}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-
-      <DialogFooter>
-        <Button onClick={handleSave} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white h-12 rounded-xl font-bold">
-          Guardar Estadísticas
-        </Button>
-      </DialogFooter>
-    </DialogContent>
   );
 }
