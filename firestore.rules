@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    match /team/{teamId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /players/{playerId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /seasons/{seasonId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /opponents/{opponentId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /matches/{matchId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /playerStats/{statId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /lineups/{lineupId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

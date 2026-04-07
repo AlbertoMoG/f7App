@@ -1,0 +1,86 @@
+{
+  "entities": {
+    "Player": {
+      "title": "Player",
+      "description": "A player in the football team",
+      "type": "object",
+      "properties": {
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "number": { "type": "number" },
+        "position": { "type": "string", "enum": ["Portero", "Defensa", "Medio", "Delantero"] },
+        "age": { "type": "number" },
+        "photoUrl": { "type": "string", "format": "uri" }
+      },
+      "required": ["firstName", "lastName", "number", "position"]
+    },
+    "Season": {
+      "title": "Season",
+      "description": "A football season",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Opponent": {
+      "title": "Opponent",
+      "description": "An opposing team",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Match": {
+      "title": "Match",
+      "description": "A football match",
+      "type": "object",
+      "properties": {
+        "seasonId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "opponentId": { "type": "string" },
+        "scoreTeam": { "type": "number" },
+        "scoreOpponent": { "type": "number" },
+        "status": { "type": "string", "enum": ["scheduled", "completed"] }
+      },
+      "required": ["seasonId", "date", "opponentId", "status"]
+    },
+    "PlayerStat": {
+      "title": "Player Statistics",
+      "description": "Statistics for a player in a specific match",
+      "type": "object",
+      "properties": {
+        "playerId": { "type": "string" },
+        "matchId": { "type": "string" },
+        "seasonId": { "type": "string" },
+        "attendance": { "type": "string", "enum": ["attending", "notAttending", "noResponse"] },
+        "goals": { "type": "number" },
+        "assists": { "type": "number" },
+        "yellowCards": { "type": "number" },
+        "redCards": { "type": "number" }
+      },
+      "required": ["playerId", "matchId", "seasonId", "attendance"]
+    },
+    "Lineup": {
+      "title": "Lineup",
+      "description": "A saved team lineup",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "formation": { "type": "string" },
+        "slots": { "type": "array", "items": { "type": "object" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "formation", "slots", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/players/{playerId}": { "schema": "Player", "description": "Collection of players" },
+    "/seasons/{seasonId}": { "schema": "Season", "description": "Collection of seasons" },
+    "/opponents/{opponentId}": { "schema": "Opponent", "description": "Collection of opposing teams" },
+    "/matches/{matchId}": { "schema": "Match", "description": "Collection of matches" },
+    "/playerStats/{statId}": { "schema": "PlayerStat", "description": "Collection of player statistics per match" },
+    "/lineups/{lineupId}": { "schema": "Lineup", "description": "Collection of saved lineups" }
+  }
+}
