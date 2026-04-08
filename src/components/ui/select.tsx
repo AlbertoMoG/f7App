@@ -3,21 +3,23 @@
 import * as React from "react"
 import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
-import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
+import { ChevronDownIcon, CheckIcon } from "lucide-react"
 
 const Select = SelectPrimitive.Root
-
 const SelectGroup = SelectPrimitive.Group
 
+// Hemos simplificado SelectValue para que sea 100% controlable por ti
 const SelectValue = React.forwardRef<
   HTMLSpanElement,
-  SelectPrimitive.Value.Props
->(({ className, ...props }, ref) => (
-  <SelectPrimitive.Value
+  React.HTMLAttributes<HTMLSpanElement>
+>(({ className, children, ...props }, ref) => (
+  <span
     ref={ref}
     className={cn("block truncate text-left w-full", className)}
     {...props}
-  />
+  >
+    {children}
+  </span>
 ))
 SelectValue.displayName = "SelectValue"
 
@@ -28,7 +30,7 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-10 w-full items-center justify-between gap-2 rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+      "flex h-12 w-full items-center justify-between gap-2 rounded-xl border border-input bg-gray-50 px-4 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
       className
     )}
     {...props}
@@ -66,28 +68,24 @@ SelectContent.displayName = "SelectContent"
 
 const SelectItem = React.forwardRef<
   HTMLDivElement,
-  SelectPrimitive.Item.Props & { label?: string }
->(({ className, children, label, ...props }, ref) => {
-  const itemLabel = label || (typeof children === 'string' ? children : undefined);
-  return (
-    <SelectPrimitive.Item
-      ref={ref}
-      className={cn(
-        "relative flex w-full cursor-default select-none items-center rounded-lg py-1.5 pl-2 pr-8 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        className
-      )}
-      label={itemLabel}
-      {...props}
-    >
-      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-      <span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
-        <SelectPrimitive.ItemIndicator>
-          <CheckIcon className="h-4 w-4" />
-        </SelectPrimitive.ItemIndicator>
-      </span>
-    </SelectPrimitive.Item>
-  )
-})
+  SelectPrimitive.Item.Props
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex w-full cursor-default select-none items-center rounded-lg py-2 pl-2 pr-8 text-sm outline-none focus:bg-emerald-50 focus:text-emerald-900 data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className
+    )}
+    {...props}
+  >
+    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+    <span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
+      <SelectPrimitive.ItemIndicator>
+        <CheckIcon className="h-4 w-4 text-emerald-600" />
+      </SelectPrimitive.ItemIndicator>
+    </span>
+  </SelectPrimitive.Item>
+))
 SelectItem.displayName = "SelectItem"
 
 export {

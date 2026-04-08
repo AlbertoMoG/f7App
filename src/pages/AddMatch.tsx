@@ -1,11 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  collection, 
-  addDoc, 
-  onSnapshot 
-} from 'firebase/firestore';
-import { db } from '../firebase';
 import { Season, Opponent, MatchType, Match } from '../types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -20,6 +14,7 @@ import {
 } from '@/components/ui/select';
 import { ArrowLeft, Calendar, Save } from 'lucide-react';
 import { motion } from 'motion/react';
+import { toast } from 'sonner';
 
 interface AddMatchProps {
   seasons: Season[];
@@ -36,7 +31,9 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
   const [isHome, setIsHome] = useState<string>('true');
   const [round, setRound] = useState<string>('');
   const [date, setDate] = useState<string>('');
+  const [location, setLocation] = useState<string>('');
 
+  // Precargar datos iniciales
   useEffect(() => {
     if (seasons.length > 0 && !seasonId) {
       const currentYear = new Date().getFullYear().toString();
@@ -63,6 +60,7 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
         status: 'scheduled',
         type,
         isHome: isHome === 'true',
+        location,
       };
       
       if (round) {
@@ -73,8 +71,18 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
       navigate('/matches');
     } catch (error) {
       console.error("Error creating match:", error);
+      toast.error('Error al crear el partido');
     }
   };
+
+  // Prevenir renderizado hasta que los datos existan para evitar el bug del selector
+  if (seasons.length === 0 || opponents.length === 0) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F0] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-emerald-600 border-t-transparent"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F5F5F0] pb-20">
@@ -107,15 +115,21 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
             <CardContent className="p-8">
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  
+                  {/* 1. SELECTOR DE TEMPORADA */}
                   <div className="space-y-2">
                     <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Temporada</Label>
                     <Select value={seasonId} onValueChange={setSeasonId} required>
-                      <SelectTrigger className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500">
-                        <SelectValue placeholder="Selecciona temporada" />
+                      <SelectTrigger>
+                        <SelectValue>
+                          {seasonId 
+                            ? seasons.find(s => s.id === seasonId)?.name 
+                            : <span className="text-gray-400">Selecciona temporada</span>}
+                        </SelectValue>
                       </SelectTrigger>
-                      <SelectContent className="rounded-2xl border-none shadow-2xl">
+                      <SelectContent>
                         {seasons.map((s) => (
-                          <SelectItem key={s.id} value={s.id} label={s.name}>
+                          <SelectItem key={s.id} value={s.id}>
                             {s.name}
                           </SelectItem>
                         ))}
@@ -123,15 +137,20 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
                     </Select>
                   </div>
 
+                  {/* 2. SELECTOR DE RIVAL */}
                   <div className="space-y-2">
                     <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Rival</Label>
                     <Select value={opponentId} onValueChange={setOpponentId} required>
-                      <SelectTrigger className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500">
-                        <SelectValue placeholder="Selecciona rival" />
+                      <SelectTrigger>
+                        <SelectValue>
+                          {opponentId 
+                            ? opponents.find(o => o.id === opponentId)?.name 
+                            : <span className="text-gray-400">Selecciona rival</span>}
+                        </SelectValue>
                       </SelectTrigger>
-                      <SelectContent className="rounded-2xl border-none shadow-2xl">
+                      <SelectContent>
                         {opponents.map((o) => (
-                          <SelectItem key={o.id} value={o.id} label={o.name}>
+                          <SelectItem key={o.id} value={o.id}>
                             {o.name}
                           </SelectItem>
                         ))}
@@ -139,29 +158,35 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
                     </Select>
                   </div>
 
+                  {/* 3. SELECTOR DE TIPO */}
                   <div className="space-y-2">
                     <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Tipo de Partido</Label>
                     <Select value={type} onValueChange={(v: MatchType) => setType(v)} required>
-                      <SelectTrigger className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500">
-                        <SelectValue placeholder="Selecciona tipo" />
+                      <SelectTrigger>
+                        <SelectValue>
+                          {type === 'friendly' ? 'Amistoso' : type === 'league' ? 'Liga' : type === 'cup' ? 'Copa' : <span className="text-gray-400">Selecciona tipo</span>}
+                        </SelectValue>
                       </SelectTrigger>
-                      <SelectContent className="rounded-2xl border-none shadow-2xl">
-                        <SelectItem value="friendly" label="Amistoso">Amistoso</SelectItem>
-                        <SelectItem value="league" label="Liga">Liga</SelectItem>
-                        <SelectItem value="cup" label="Copa">Copa</SelectItem>
+                      <SelectContent>
+                        <SelectItem value="friendly">Amistoso</SelectItem>
+                        <SelectItem value="league">Liga</SelectItem>
+                        <SelectItem value="cup">Copa</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
+                  {/* 4. SELECTOR DE CONDICIÓN */}
                   <div className="space-y-2">
                     <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Condición</Label>
                     <Select value={isHome} onValueChange={setIsHome} required>
-                      <SelectTrigger className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500">
-                        <SelectValue placeholder="Selecciona condición" />
+                      <SelectTrigger>
+                        <SelectValue>
+                          {isHome === 'true' ? 'Local' : isHome === 'false' ? 'Visitante' : <span className="text-gray-400">Selecciona condición</span>}
+                        </SelectValue>
                       </SelectTrigger>
-                      <SelectContent className="rounded-2xl border-none shadow-2xl">
-                        <SelectItem value="true" label="Local">Local</SelectItem>
-                        <SelectItem value="false" label="Visitante">Visitante</SelectItem>
+                      <SelectContent>
+                        <SelectItem value="true">Local</SelectItem>
+                        <SelectItem value="false">Visitante</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -188,6 +213,16 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                       required 
+                      className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Lugar de juego</Label>
+                    <Input 
+                      value={location}
+                      onChange={(e) => setLocation(e.target.value)}
+                      placeholder="Ej: Polideportivo Municipal"
                       className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
                     />
                   </div>

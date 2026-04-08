@@ -7,6 +7,7 @@
       "properties": {
         "firstName": { "type": "string" },
         "lastName": { "type": "string" },
+        "alias": { "type": "string" },
         "number": { "type": "number" },
         "position": { "type": "string", "enum": ["Portero", "Defensa", "Medio", "Delantero"] },
         "age": { "type": "number" },
@@ -28,7 +29,9 @@
       "description": "An opposing team",
       "type": "object",
       "properties": {
-        "name": { "type": "string" }
+        "name": { "type": "string" },
+        "shieldUrl": { "type": "string", "format": "uri" },
+        "seasonIds": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["name"]
     },

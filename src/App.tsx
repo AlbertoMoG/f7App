@@ -10,7 +10,10 @@ import {
   query, 
   where,
   getDoc,
-  setDoc
+  getDocs,
+  setDoc,
+  writeBatch,
+  arrayUnion
 } from 'firebase/firestore';
 import { 
   signInWithPopup, 
@@ -31,7 +34,9 @@ import TeamSettings from './components/TeamSettings';
 import MatchStats from './pages/MatchStats';
 import AddMatch from './pages/AddMatch';
 import { Button } from '@/components/ui/button';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { Trophy, LogIn } from 'lucide-react';
+import { Toaster, toast } from 'sonner';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -116,36 +121,208 @@ export default function App() {
   };
 
   // CRUD Handlers
-  const saveTeam = async (t: Omit<Team, 'id'>) => await addDoc(collection(db, 'team'), t);
-  const updateTeam = async (t: Team) => await updateDoc(doc(db, 'team', t.id), { ...t });
-
-  const addPlayer = async (p: Omit<Player, 'id'>) => await addDoc(collection(db, 'players'), p);
-  const updatePlayer = async (p: Player) => await updateDoc(doc(db, 'players', p.id), { ...p });
-  const deletePlayer = async (id: string) => await deleteDoc(doc(db, 'players', id));
-
-  const addSeason = async (name: string) => await addDoc(collection(db, 'seasons'), { name });
-  const deleteSeason = async (id: string) => await deleteDoc(doc(db, 'seasons', id));
-
-  const addOpponent = async (name: string, shieldUrl?: string) => await addDoc(collection(db, 'opponents'), { name, shieldUrl: shieldUrl || null });
-  const deleteOpponent = async (id: string) => await deleteDoc(doc(db, 'opponents', id));
-
-  const addMatch = async (m: Omit<Match, 'id'>) => await addDoc(collection(db, 'matches'), m);
-  const updateMatch = async (m: Match) => await updateDoc(doc(db, 'matches', m.id), { ...m });
-  const deleteMatch = async (id: string) => await deleteDoc(doc(db, 'matches', id));
-
-  const updateStats = async (newStats: PlayerStat[]) => {
-    for (const stat of newStats) {
-      if (stat.id) {
-        await updateDoc(doc(db, 'playerStats', stat.id), { ...stat });
-      } else {
-        const { id, ...rest } = stat;
-        await addDoc(collection(db, 'playerStats'), rest);
-      }
+  const saveTeam = async (t: Omit<Team, 'id'>) => {
+    try {
+      await addDoc(collection(db, 'team'), t);
+      toast.success('Equipo configurado correctamente');
+    } catch (error) {
+      toast.error('Error al guardar el equipo');
+      throw error;
     }
   };
 
-  const saveLineup = async (l: Omit<Lineup, 'id'>) => await addDoc(collection(db, 'lineups'), l);
-  const deleteLineup = async (id: string) => await deleteDoc(doc(db, 'lineups', id));
+  const updateTeam = async (t: Team) => {
+    try {
+      await updateDoc(doc(db, 'team', t.id), { ...t });
+      toast.success('Ajustes del equipo actualizados');
+    } catch (error) {
+      toast.error('Error al actualizar el equipo');
+      throw error;
+    }
+  };
+
+  const addPlayer = async (p: Omit<Player, 'id'>) => {
+    try {
+      await addDoc(collection(db, 'players'), p);
+      toast.success('Jugador añadido correctamente');
+    } catch (error) {
+      toast.error('Error al añadir jugador');
+      throw error;
+    }
+  };
+
+  const updatePlayer = async (p: Player) => {
+    try {
+      await updateDoc(doc(db, 'players', p.id), { ...p });
+      toast.success('Jugador actualizado correctamente');
+    } catch (error) {
+      toast.error('Error al actualizar jugador');
+      throw error;
+    }
+  };
+
+  const deletePlayer = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'players', id));
+      toast.success('Jugador eliminado');
+    } catch (error) {
+      toast.error('Error al eliminar jugador');
+      throw error;
+    }
+  };
+
+  const addSeason = async (name: string, playerIds: string[] = []) => {
+    try {
+      const batch = writeBatch(db);
+      
+      // 1. Crear la temporada
+      const seasonRef = doc(collection(db, 'seasons'));
+      batch.set(seasonRef, { name });
+      
+      // 2. Asociar jugadores seleccionados
+      playerIds.forEach(playerId => {
+        const playerRef = doc(db, 'players', playerId);
+        batch.update(playerRef, {
+          seasonIds: arrayUnion(seasonRef.id)
+        });
+      });
+      
+      await batch.commit();
+      toast.success('Temporada creada y jugadores asociados');
+    } catch (error) {
+      console.error("Error creating season:", error);
+      toast.error('Error al crear temporada');
+      throw error;
+    }
+  };
+
+  const deleteSeason = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'seasons', id));
+      toast.success('Temporada eliminada');
+    } catch (error) {
+      toast.error('Error al eliminar temporada');
+      throw error;
+    }
+  };
+
+  const addOpponent = async (name: string, shieldUrl?: string, seasonIds: string[] = []) => {
+    try {
+      await addDoc(collection(db, 'opponents'), { 
+        name, 
+        shieldUrl: shieldUrl || null,
+        seasonIds: seasonIds.length > 0 ? seasonIds : []
+      });
+      toast.success('Rival añadido');
+    } catch (error) {
+      toast.error('Error al añadir rival');
+      throw error;
+    }
+  };
+
+  const updateOpponent = async (id: string, name: string, shieldUrl?: string, seasonIds: string[] = []) => {
+    try {
+      await updateDoc(doc(db, 'opponents', id), { 
+        name, 
+        shieldUrl: shieldUrl || null,
+        seasonIds: seasonIds.length > 0 ? seasonIds : []
+      });
+      toast.success('Rival actualizado');
+    } catch (error) {
+      toast.error('Error al actualizar rival');
+      throw error;
+    }
+  };
+
+  const deleteOpponent = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'opponents', id));
+      toast.success('Rival eliminado');
+    } catch (error) {
+      toast.error('Error al eliminar rival');
+      throw error;
+    }
+  };
+
+  const addMatch = async (m: Omit<Match, 'id'>) => {
+    try {
+      await addDoc(collection(db, 'matches'), m);
+      toast.success('Partido programado');
+    } catch (error) {
+      toast.error('Error al programar partido');
+      throw error;
+    }
+  };
+
+  const updateMatch = async (m: Match) => {
+    try {
+      await updateDoc(doc(db, 'matches', m.id), { ...m });
+      toast.success('Partido actualizado');
+    } catch (error) {
+      toast.error('Error al actualizar partido');
+      throw error;
+    }
+  };
+
+  const deleteMatch = async (id: string) => {
+    try {
+      // 1. Eliminar físicamente las estadísticas de los jugadores asociadas a este partido
+      const statsQuery = query(collection(db, 'playerStats'), where('matchId', '==', id));
+      const statsSnapshot = await getDocs(statsQuery);
+      
+      const batch = writeBatch(db);
+      statsSnapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      
+      // 2. Eliminar el partido
+      batch.delete(doc(db, 'matches', id));
+      
+      await batch.commit();
+      toast.success('Partido y sus estadísticas eliminados correctamente');
+    } catch (error) {
+      console.error("Error deleting match and stats:", error);
+      toast.error('Error al eliminar el partido y sus datos');
+      throw error;
+    }
+  };
+
+  const updateStats = async (newStats: PlayerStat[]) => {
+    try {
+      for (const stat of newStats) {
+        if (stat.id) {
+          await updateDoc(doc(db, 'playerStats', stat.id), { ...stat });
+        } else {
+          const { id, ...rest } = stat;
+          await addDoc(collection(db, 'playerStats'), rest);
+        }
+      }
+      toast.success('Estadísticas actualizadas');
+    } catch (error) {
+      toast.error('Error al actualizar estadísticas');
+      throw error;
+    }
+  };
+
+  const saveLineup = async (l: Omit<Lineup, 'id'>) => {
+    try {
+      await addDoc(collection(db, 'lineups'), l);
+      toast.success('Alineación guardada');
+    } catch (error) {
+      toast.error('Error al guardar alineación');
+      throw error;
+    }
+  };
+
+  const deleteLineup = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'lineups', id));
+      toast.success('Alineación eliminada');
+    } catch (error) {
+      toast.error('Error al eliminar alineación');
+      throw error;
+    }
+  };
 
   if (loading) {
     return (
@@ -180,85 +357,92 @@ export default function App() {
   }
 
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={
-          <Layout 
-            activeTab={activeTab} 
-            setActiveTab={setActiveTab} 
-            user={user} 
-            team={team}
-            onLogout={handleLogout}
-          >
-            {activeTab === 'dashboard' && (
-              <Dashboard 
-                players={players} 
-                matches={matches} 
-                stats={stats} 
-                opponents={opponents} 
-              />
-            )}
-            {activeTab === 'players' && (
-              <PlayerList 
-                players={players} 
-                stats={stats}
-                seasons={seasons}
-                onAddPlayer={addPlayer} 
-                onUpdatePlayer={updatePlayer} 
-                onDeletePlayer={deletePlayer} 
-              />
-            )}
-            {activeTab === 'matches' && (
-              <MatchList 
-                team={team}
-                players={players} 
-                matches={matches} 
-                stats={stats} 
-                seasons={seasons} 
-                opponents={opponents} 
-                onUpdateMatch={updateMatch} 
-                onDeleteMatch={deleteMatch} 
-                onUpdateStats={updateStats}
-              />
-            )}
-            {activeTab === 'simulator' && (
-              <LineupSimulator 
-                players={players} 
-                lineups={lineups} 
-                onSaveLineup={saveLineup} 
-                onDeleteLineup={deleteLineup} 
-              />
-            )}
-            {activeTab === 'seasons' && (
-              <SeasonManager 
-                seasons={seasons} 
-                opponents={opponents} 
-                onAddSeason={addSeason} 
-                onAddOpponent={addOpponent} 
-                onDeleteSeason={deleteSeason} 
-                onDeleteOpponent={deleteOpponent} 
-              />
-            )}
-            {activeTab === 'team' && (
-              <TeamSettings 
-                team={team}
-                onSaveTeam={saveTeam}
-                onUpdateTeam={updateTeam}
-              />
-            )}
-          </Layout>
-        } />
-        <Route path="/matches/:matchId/stats" element={<MatchStats />} />
-        <Route path="/matches/new" element={
-          <AddMatch 
-            seasons={seasons} 
-            opponents={opponents} 
-            onAddMatch={addMatch} 
-          />
-        } />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Router>
+    <TooltipProvider>
+      <Toaster position="top-center" richColors />
+      <Router>
+        <Routes>
+          <Route path="/" element={
+            <Layout 
+              activeTab={activeTab} 
+              setActiveTab={setActiveTab} 
+              user={user} 
+              team={team}
+              onLogout={handleLogout}
+            >
+              {activeTab === 'dashboard' && (
+                <Dashboard 
+                  players={players} 
+                  matches={matches} 
+                  stats={stats} 
+                  opponents={opponents} 
+                  seasons={seasons}
+                />
+              )}
+              {activeTab === 'players' && (
+                <PlayerList 
+                  players={players} 
+                  stats={stats}
+                  matches={matches}
+                  seasons={seasons}
+                  onAddPlayer={addPlayer} 
+                  onUpdatePlayer={updatePlayer} 
+                  onDeletePlayer={deletePlayer} 
+                />
+              )}
+              {activeTab === 'matches' && (
+                <MatchList 
+                  team={team}
+                  players={players} 
+                  matches={matches} 
+                  stats={stats} 
+                  seasons={seasons} 
+                  opponents={opponents} 
+                  onUpdateMatch={updateMatch} 
+                  onDeleteMatch={deleteMatch} 
+                  onUpdateStats={updateStats}
+                />
+              )}
+              {activeTab === 'simulator' && (
+                <LineupSimulator 
+                  players={players} 
+                  lineups={lineups} 
+                  onSaveLineup={saveLineup} 
+                  onDeleteLineup={deleteLineup} 
+                />
+              )}
+              {activeTab === 'seasons' && (
+                <SeasonManager 
+                  seasons={seasons} 
+                  opponents={opponents} 
+                  players={players}
+                  onAddSeason={addSeason} 
+                  onAddOpponent={addOpponent} 
+                  onUpdateOpponent={updateOpponent}
+                  onDeleteSeason={deleteSeason} 
+                  onDeleteOpponent={deleteOpponent} 
+                />
+              )}
+              {activeTab === 'team' && (
+                <TeamSettings 
+                  team={team}
+                  onSaveTeam={saveTeam}
+                  onUpdateTeam={updateTeam}
+                />
+              )}
+            </Layout>
+          } />
+          <Route path="/matches/:matchId/stats" element={<MatchStats />} />
+          <Route path="/matches/new" element={
+            <AddMatch 
+              seasons={seasons} 
+              opponents={opponents} 
+              onAddMatch={addMatch} 
+            />
+          } />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Router>
+    </TooltipProvider>
   );
 }
 

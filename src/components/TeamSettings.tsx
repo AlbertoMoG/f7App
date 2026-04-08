@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Shield, Save, Upload, Loader2 } from 'lucide-react';
 import { Team } from '../types';
 import { uploadImage } from '../lib/imageUpload';
+import { toast } from 'sonner';
 
 interface TeamSettingsProps {
   team: Team | null;
@@ -36,7 +37,7 @@ export default function TeamSettings({ team, onSaveTeam, onUpdateTeam }: TeamSet
       setShieldUrl(url);
     } catch (error) {
       console.error("Error uploading team shield:", error);
-      alert("Hubo un error al subir la imagen.");
+      toast.error("Hubo un error al subir la imagen.");
     } finally {
       setIsUploading(false);
     }
@@ -54,7 +55,7 @@ export default function TeamSettings({ team, onSaveTeam, onUpdateTeam }: TeamSet
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
       <header>
-        <h2 className="text-3xl font-bold tracking-tight">Mi Equipo</h2>
+        <h2 className="text-3xl font-bold tracking-tight">{team?.name || 'Mi Equipo'}</h2>
         <p className="text-gray-500">Configura los detalles de tu equipo.</p>
       </header>
 

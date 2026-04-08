@@ -39,6 +39,7 @@ service cloud.firestore {
       return hasRequiredFields(['firstName', 'lastName', 'number', 'position']) &&
              isValidString('firstName', 1, 50) &&
              isValidString('lastName', 1, 50) &&
+             (!('alias' in request.resource.data) || isValidString('alias', 1, 50)) &&
              isValidNumber('number', 1, 99) &&
              request.resource.data.position in ['Portero', 'Defensa', 'Medio', 'Delantero'];
     }
@@ -50,7 +51,8 @@ service cloud.firestore {
 
     function isValidOpponent() {
       return hasRequiredFields(['name']) &&
-             isValidString('name', 1, 100);
+             isValidString('name', 1, 100) &&
+             (!('seasonIds' in request.resource.data) || request.resource.data.seasonIds is list);
     }
 
     function isValidMatch() {

@@ -12,11 +12,13 @@ export interface Player {
   id: string;
   firstName: string;
   lastName: string;
+  alias?: string;
   number: number;
   position: Position;
   birthDate: string;
   photoUrl?: string;
   isInjured?: boolean;
+  isActive?: boolean;
   seasonIds?: string[];
 }
 
@@ -29,6 +31,7 @@ export interface Opponent {
   id: string;
   name: string;
   shieldUrl?: string;
+  seasonIds?: string[];
 }
 
 export type MatchType = 'friendly' | 'league' | 'cup';
@@ -44,6 +47,7 @@ export interface Match {
   type?: MatchType;
   round?: string;
   isHome?: boolean;
+  location?: string;
 }
 
 export interface PlayerStat {

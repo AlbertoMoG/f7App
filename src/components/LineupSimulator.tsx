@@ -194,7 +194,7 @@ export default function LineupSimulator({ players, lineups, onSaveLineup, onDele
                             </div>
                           </div>
                           <span className="text-[10px] font-bold mt-1 truncate max-w-[60px] text-emerald-900">
-                            {player.firstName}
+                            {player.alias || player.firstName}
                           </span>
                         </>
                       ) : (
@@ -269,40 +269,59 @@ export default function LineupSimulator({ players, lineups, onSaveLineup, onDele
               <CardTitle className="text-lg">Plantilla</CardTitle>
               <CardDescription>Arrastra a los jugadores al campo.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-              {players.map(player => {
-                const isInLineup = currentLineup.includes(player.id);
+            <CardContent className="space-y-6 max-h-[500px] overflow-y-auto pr-2">
+              {(['Portero', 'Defensa', 'Medio', 'Delantero'] as const).map((pos) => {
+                const posPlayers = players.filter(p => p.position === pos && p.isActive !== false);
+                if (posPlayers.length === 0) return null;
+
                 return (
-                  <div
-                    key={player.id}
-                    draggable={!isInLineup}
-                    onDragStart={() => setDraggedPlayerId(player.id)}
-                    className={cn(
-                      "flex items-center gap-3 p-3 rounded-xl border transition-all cursor-grab active:cursor-grabbing",
-                      isInLineup 
-                        ? "bg-gray-50 border-gray-100 opacity-50 grayscale" 
-                        : "bg-white border-gray-100 hover:border-emerald-200 hover:shadow-sm"
-                    )}
-                  >
-                    <div className="relative">
-                      <img 
-                        src={player.photoUrl || `https://picsum.photos/seed/${player.id}/100/100`} 
-                        className="w-10 h-10 rounded-full object-cover bg-emerald-50"
-                        alt=""
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute -bottom-1 -right-1 bg-emerald-600 text-white text-[8px] font-bold h-4 w-4 rounded-full flex items-center justify-center">
-                        {player.number}
-                      </div>
+                  <div key={pos} className="space-y-2">
+                    <div className="flex items-center gap-2 px-1">
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{pos}s</span>
+                      <div className="h-px flex-1 bg-gray-100" />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold truncate">{player.firstName} {player.lastName}</p>
-                      <p className="text-[10px] text-gray-400 font-medium uppercase">{player.position}</p>
+                    <div className="space-y-2">
+                      {posPlayers.map(player => {
+                        const isInLineup = currentLineup.includes(player.id);
+                        return (
+                          <div
+                            key={player.id}
+                            draggable={!isInLineup}
+                            onDragStart={() => setDraggedPlayerId(player.id)}
+                            className={cn(
+                              "flex items-center gap-3 p-2.5 rounded-xl border transition-all cursor-grab active:cursor-grabbing",
+                              isInLineup 
+                                ? "bg-gray-50 border-gray-100 opacity-50 grayscale" 
+                                : "bg-white border-gray-100 hover:border-emerald-200 hover:shadow-sm"
+                            )}
+                          >
+                            <div className="relative">
+                              <img 
+                                src={player.photoUrl || `https://picsum.photos/seed/${player.id}/100/100`} 
+                                className="w-9 h-9 rounded-full object-cover bg-emerald-50"
+                                alt=""
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute -bottom-1 -right-1 bg-emerald-600 text-white text-[8px] font-bold h-4 w-4 rounded-full flex items-center justify-center">
+                                {player.number}
+                              </div>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-bold truncate">
+                                {player.alias || `${player.firstName} ${player.lastName}`}
+                              </p>
+                            </div>
+                            {isInLineup && <div className="w-2 h-2 rounded-full bg-emerald-500" />}
+                          </div>
+                        );
+                      })}
                     </div>
-                    {isInLineup && <div className="w-2 h-2 rounded-full bg-emerald-500" />}
                   </div>
                 );
               })}
+              {players.filter(p => p.isActive !== false).length === 0 && (
+                <p className="text-xs text-center text-gray-400 py-4 italic">No hay jugadores disponibles.</p>
+              )}
             </CardContent>
           </Card>
 

@@ -24,17 +24,17 @@ interface LayoutProps {
   onLogout: () => void;
 }
 
-const navItems = [
-  { id: 'dashboard', label: 'Resumen', icon: LayoutDashboard },
-  { id: 'team', label: 'Mi Equipo', icon: Shield },
-  { id: 'players', label: 'Jugadores', icon: Users },
-  { id: 'matches', label: 'Partidos', icon: Calendar },
-  { id: 'simulator', label: 'Simulador', icon: Trophy },
-  { id: 'seasons', label: 'Temporadas', icon: Settings },
-];
-
 export default function Layout({ children, activeTab, setActiveTab, user, team, onLogout }: LayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
+
+  const navItems = [
+    { id: 'dashboard', label: 'Resumen', icon: LayoutDashboard },
+    { id: 'team', label: team?.name || 'Mi Equipo', icon: Shield },
+    { id: 'players', label: 'Jugadores', icon: Users },
+    { id: 'matches', label: 'Partidos', icon: Calendar },
+    { id: 'simulator', label: 'Simulador', icon: Trophy },
+    { id: 'seasons', label: 'Temporadas', icon: Settings },
+  ];
 
   return (
     <div className="min-h-screen bg-[#F5F5F0] flex text-[#141414] font-sans">
