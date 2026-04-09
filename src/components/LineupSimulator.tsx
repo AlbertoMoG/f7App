@@ -1,11 +1,11 @@
 import React from 'react';
-import { motion } from 'motion/react';
 import { 
   RotateCcw,
   Save,
   Info,
   Trash2,
   ChevronDown,
+  Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -20,12 +20,18 @@ import {
   DialogFooter,
   DialogDescription
 } from '@/components/ui/dialog';
-import { Player, Lineup, LineupSlot } from '../types';
+import { Player, Lineup, LineupSlot, Match, PlayerStat, Season } from '../types';
 import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { toPng } from 'html-to-image';
 
 interface LineupSimulatorProps {
   players: Player[];
   lineups: Lineup[];
+  matches: Match[];
+  stats: PlayerStat[];
+  seasons: Season[];
   onSaveLineup: (lineup: Omit<Lineup, 'id'>) => void;
   onDeleteLineup: (id: string) => void;
 }
@@ -60,12 +66,30 @@ const FORMATIONS = [
   ]},
 ];
 
-export default function LineupSimulator({ players, lineups, onSaveLineup, onDeleteLineup }: LineupSimulatorProps) {
+export default function LineupSimulator({ players, lineups, matches, stats, seasons, onSaveLineup, onDeleteLineup }: LineupSimulatorProps) {
   const [activeFormation, setActiveFormation] = React.useState(FORMATIONS[0]);
   const [currentLineup, setCurrentLineup] = React.useState<(string | null)[]>(new Array(7).fill(null));
   const [draggedPlayerId, setDraggedPlayerId] = React.useState<string | null>(null);
   const [lineupName, setLineupName] = React.useState('');
   const [isSaveDialogOpen, setIsSaveDialogOpen] = React.useState(false);
+  const [selectedSeasonId, setSelectedSeasonId] = React.useState<string>('');
+  const [selectedMatchId, setSelectedMatchId] = React.useState<string>('');
+  const [isExporting, setIsExporting] = React.useState(false);
+  const lineupRef = React.useRef<HTMLDivElement>(null);
+
+  const filteredMatches = matches.filter(m => !selectedSeasonId || m.seasonId === selectedSeasonId);
+
+  const eligiblePlayers = players.filter(p => {
+    if (!selectedMatchId) return true;
+    const stat = stats.find(s => s.matchId === selectedMatchId && s.playerId === p.id);
+    return stat ? stat.attendance === 'attending' : false;
+  });
+
+  const notEligiblePlayers = players.filter(p => {
+    if (!selectedMatchId) return false;
+    const stat = stats.find(s => s.matchId === selectedMatchId && s.playerId === p.id);
+    return stat ? stat.attendance !== 'attending' : true;
+  });
 
   const handleDrop = (index: number) => {
     if (!draggedPlayerId) return;
@@ -90,10 +114,16 @@ export default function LineupSimulator({ players, lineups, onSaveLineup, onDele
       playerId: currentLineup[i]
     }));
 
+    const benchPlayerIds = eligiblePlayers
+      .filter(p => !currentLineup.includes(p.id))
+      .map(p => p.id);
+
     onSaveLineup({
       name: lineupName,
       formation: activeFormation.name,
       slots,
+      matchId: selectedMatchId || undefined,
+      benchPlayerIds,
       createdAt: new Date().toISOString()
     });
     
@@ -107,6 +137,26 @@ export default function LineupSimulator({ players, lineups, onSaveLineup, onDele
     setCurrentLineup(l.slots.map(s => s.playerId));
   };
 
+  const handleExportImage = async () => {
+    if (!lineupRef.current) return;
+    try {
+      setIsExporting(true);
+      const dataUrl = await toPng(lineupRef.current, {
+        cacheBust: true,
+        backgroundColor: '#F5F5F0',
+        pixelRatio: 2,
+      });
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `alineacion-${format(new Date(), 'yyyy-MM-dd')}.png`;
+      link.click();
+    } catch (error) {
+      console.error('Error exporting image:', error);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -115,6 +165,14 @@ export default function LineupSimulator({ players, lineups, onSaveLineup, onDele
           <p className="text-gray-500">Arrastra los jugadores al campo para probar tácticas.</p>
         </div>
         <div className="flex gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleExportImage} 
+            disabled={isExporting}
+            className="rounded-xl border-gray-200"
+          >
+            {isExporting ? 'Exportando...' : 'Descargar Imagen'}
+          </Button>
           <Button variant="outline" onClick={resetLineup} className="rounded-xl border-gray-200">
             <RotateCcw size={16} className="mr-2" /> Reiniciar
           </Button>
@@ -149,8 +207,9 @@ export default function LineupSimulator({ players, lineups, onSaveLineup, onDele
       </header>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        {/* Field */}
-        <div className="xl:col-span-2">
+        {/* Field and Bench Container for Export */}
+        <div className="xl:col-span-2" ref={lineupRef}>
+          {/* Field */}
           <Card className="border-none shadow-sm bg-emerald-700 overflow-hidden relative aspect-[3/4] sm:aspect-[4/3] rounded-3xl">
             <div className="absolute inset-0 opacity-20 pointer-events-none">
               {/* Field Markings */}
@@ -175,25 +234,25 @@ export default function LineupSimulator({ players, lineups, onSaveLineup, onDele
                     style={{ left: `${slot.x}%`, top: `${slot.y}%` }}
                   >
                     <div className={cn(
-                      "w-16 h-16 sm:w-20 sm:h-20 rounded-full flex flex-col items-center justify-center transition-all border-2 border-dashed",
+                      "flex flex-col items-center justify-center transition-all",
                       player 
-                        ? "bg-white border-white shadow-xl scale-110" 
-                        : "bg-emerald-800/50 border-emerald-500/50 hover:bg-emerald-800/80"
+                        ? "scale-110 z-10" 
+                        : "w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-dashed bg-emerald-800/50 border-emerald-500/50 hover:bg-emerald-800/80"
                     )}>
                       {player ? (
                         <>
-                          <div className="relative">
+                          <div className="relative flex items-end justify-center">
                             <img 
                               src={player.photoUrl || `https://picsum.photos/seed/${player.id}/100/100`} 
-                              className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover border-2 border-emerald-100"
+                              className="w-16 h-20 sm:w-20 sm:h-24 rounded-2xl object-cover drop-shadow-2xl"
                               alt=""
                               referrerPolicy="no-referrer"
                             />
-                            <div className="absolute -bottom-1 -right-1 bg-emerald-600 text-white text-[8px] font-bold h-4 w-4 rounded-full flex items-center justify-center">
+                            <div className="absolute -bottom-2 -right-2 bg-white text-emerald-900 text-[10px] sm:text-xs font-black h-6 w-6 sm:h-7 sm:w-7 rounded-full flex items-center justify-center shadow-lg border-2 border-emerald-100">
                               {player.number}
                             </div>
                           </div>
-                          <span className="text-[10px] font-bold mt-1 truncate max-w-[60px] text-emerald-900">
+                          <span className="text-[10px] sm:text-xs font-black mt-2 text-center text-white drop-shadow-md bg-black/40 px-2 py-0.5 rounded-lg whitespace-nowrap">
                             {player.alias || player.firstName}
                           </span>
                         </>
@@ -224,6 +283,50 @@ export default function LineupSimulator({ players, lineups, onSaveLineup, onDele
                 Formación {f.name}
               </Button>
             ))}
+          </div>
+
+          {/* Banquillo section */}
+          <div className="mt-10">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <Users size={20} className="text-emerald-600" />
+                Banquillo
+              </h3>
+              <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-lg">
+                {eligiblePlayers.filter(p => !currentLineup.includes(p.id)).length} Jugadores
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-4">
+              {eligiblePlayers.filter(p => !currentLineup.includes(p.id)).map(player => (
+                <div 
+                  key={player.id} 
+                  draggable
+                  onDragStart={() => setDraggedPlayerId(player.id)}
+                  className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center gap-2 hover:border-emerald-200 transition-colors cursor-grab active:cursor-grabbing"
+                >
+                  <div className="relative">
+                    <img 
+                      src={player.photoUrl || `https://picsum.photos/seed/${player.id}/100/100`} 
+                      className="w-12 h-12 rounded-full object-cover border-2 border-emerald-100"
+                      alt=""
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute -bottom-1 -right-1 bg-emerald-600 text-white text-[8px] font-bold h-4 w-4 rounded-full flex items-center justify-center border border-white">
+                      {player.number}
+                    </div>
+                  </div>
+                  <div className="text-center overflow-hidden w-full">
+                    <p className="text-xs font-bold truncate">{player.alias || player.firstName}</p>
+                    <p className="text-[10px] text-gray-500">{player.position}</p>
+                  </div>
+                </div>
+              ))}
+              {eligiblePlayers.filter(p => !currentLineup.includes(p.id)).length === 0 && (
+                <p className="col-span-full text-sm text-gray-400 italic py-8 text-center bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">
+                  No hay jugadores en el banquillo.
+                </p>
+              )}
+            </div>
           </div>
         </div>
 
@@ -270,58 +373,106 @@ export default function LineupSimulator({ players, lineups, onSaveLineup, onDele
               <CardDescription>Arrastra a los jugadores al campo.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6 max-h-[500px] overflow-y-auto pr-2">
-              {(['Portero', 'Defensa', 'Medio', 'Delantero'] as const).map((pos) => {
-                const posPlayers = players.filter(p => p.position === pos && p.isActive !== false);
-                if (posPlayers.length === 0) return null;
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs font-bold text-gray-500">Temporada</Label>
+                  <select 
+                    className="flex-1 bg-gray-50 border-none rounded-xl h-10 px-3 text-sm"
+                    value={selectedSeasonId}
+                    onChange={(e) => {
+                      setSelectedSeasonId(e.target.value);
+                      setSelectedMatchId('');
+                    }}
+                  >
+                    <option value="">Todas las temporadas</option>
+                    {seasons.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs font-bold text-gray-500">Partido</Label>
+                  <select 
+                    className="flex-1 bg-gray-50 border-none rounded-xl h-10 px-3 text-sm"
+                    value={selectedMatchId}
+                    onChange={(e) => setSelectedMatchId(e.target.value)}
+                  >
+                    <option value="">Selecciona un partido...</option>
+                    {filteredMatches.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {format(new Date(m.date), 'dd/MM')} - {m.type === 'league' ? 'Liga' : m.type === 'cup' ? 'Copa' : 'Amistoso'} {m.round ? `(${m.round})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-                return (
-                  <div key={pos} className="space-y-2">
-                    <div className="flex items-center gap-2 px-1">
-                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{pos}s</span>
-                      <div className="h-px flex-1 bg-gray-100" />
-                    </div>
-                    <div className="space-y-2">
-                      {posPlayers.map(player => {
-                        const isInLineup = currentLineup.includes(player.id);
-                        return (
-                          <div
-                            key={player.id}
-                            draggable={!isInLineup}
-                            onDragStart={() => setDraggedPlayerId(player.id)}
-                            className={cn(
-                              "flex items-center gap-3 p-2.5 rounded-xl border transition-all cursor-grab active:cursor-grabbing",
-                              isInLineup 
-                                ? "bg-gray-50 border-gray-100 opacity-50 grayscale" 
-                                : "bg-white border-gray-100 hover:border-emerald-200 hover:shadow-sm"
-                            )}
-                          >
-                            <div className="relative">
-                              <img 
-                                src={player.photoUrl || `https://picsum.photos/seed/${player.id}/100/100`} 
-                                className="w-9 h-9 rounded-full object-cover bg-emerald-50"
-                                alt=""
-                                referrerPolicy="no-referrer"
-                              />
-                              <div className="absolute -bottom-1 -right-1 bg-emerald-600 text-white text-[8px] font-bold h-4 w-4 rounded-full flex items-center justify-center">
-                                {player.number}
-                              </div>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-bold truncate">
-                                {player.alias || `${player.firstName} ${player.lastName}`}
-                              </p>
-                            </div>
-                            {isInLineup && <div className="w-2 h-2 rounded-full bg-emerald-500" />}
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <h3 className="text-xs font-black text-emerald-600 uppercase">Elegibles ({eligiblePlayers.length})</h3>
+                  {eligiblePlayers.length === 0 && <p className="text-xs text-gray-400 italic">No hay jugadores elegibles.</p>}
+                  {eligiblePlayers.map(player => {
+                    const isInLineup = currentLineup.includes(player.id);
+                    return (
+                      <div
+                        key={player.id}
+                        draggable={!isInLineup}
+                        onDragStart={() => setDraggedPlayerId(player.id)}
+                        className={cn(
+                          "flex items-center gap-3 p-2.5 rounded-xl border transition-all",
+                          isInLineup 
+                            ? "bg-gray-50 border-gray-100 opacity-50 grayscale" 
+                            : "bg-white border-gray-100 hover:border-emerald-200 hover:shadow-sm cursor-grab"
+                        )}
+                      >
+                        <div className="relative">
+                          <img 
+                            src={player.photoUrl || `https://picsum.photos/seed/${player.id}/100/100`} 
+                            className="w-10 h-12 rounded-lg object-cover"
+                            alt=""
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute -bottom-1.5 -right-1.5 bg-emerald-600 text-white text-[9px] font-black h-5 w-5 rounded-full flex items-center justify-center shadow-sm border border-white">
+                            {player.number}
                           </div>
-                        );
-                      })}
-                    </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold truncate">
+                            {player.alias || `${player.firstName} ${player.lastName}`}
+                          </p>
+                        </div>
+                        {isInLineup && <div className="w-2 h-2 rounded-full bg-emerald-500" />}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {notEligiblePlayers.length > 0 && (
+                  <div className="space-y-2 opacity-60">
+                    <h3 className="text-xs font-black text-gray-500 uppercase">No Elegibles ({notEligiblePlayers.length})</h3>
+                    {notEligiblePlayers.map(player => (
+                      <div
+                        key={player.id}
+                        className="flex items-center gap-3 p-2.5 rounded-xl border bg-gray-50 border-gray-100"
+                      >
+                        <div className="relative">
+                          <img 
+                            src={player.photoUrl || `https://picsum.photos/seed/${player.id}/100/100`} 
+                            className="w-10 h-12 rounded-lg object-cover grayscale"
+                            alt=""
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold truncate text-gray-500">
+                            {player.alias || `${player.firstName} ${player.lastName}`}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                );
-              })}
-              {players.filter(p => p.isActive !== false).length === 0 && (
-                <p className="text-xs text-center text-gray-400 py-4 italic">No hay jugadores disponibles.</p>
-              )}
+                )}
+              </div>
             </CardContent>
           </Card>
 

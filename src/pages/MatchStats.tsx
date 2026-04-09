@@ -14,7 +14,6 @@ import { db } from '../firebase';
 import { Player, Match, PlayerStat, Attendance, Opponent, Team } from '../types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { 
   Select, 
   SelectContent, 
@@ -31,7 +30,7 @@ import {
   TableRow 
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowLeft, Save, Trophy, Users, ShieldAlert, CheckCircle2, Minus, Plus } from 'lucide-react';
+import { ArrowLeft, Save, Trophy, Users, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -80,15 +79,8 @@ export default function MatchStats() {
           setOpponent({ id: opponentDoc.id, ...opponentDoc.data() } as Opponent);
         }
 
-        // Fetch Team
-        const teamSnap = await getDoc(doc(db, 'team', 'main')); // Assuming 'main' or similar
-        // If not found, we'll try to list and get the first one
-        if (!teamSnap.exists()) {
-           const teamColl = await getDoc(doc(db, 'team', 'main')); // This is just a placeholder
-        }
-
         // Fetch Players
-        const playersUnsub = onSnapshot(collection(db, 'players'), (snapshot) => {
+        onSnapshot(collection(db, 'players'), (snapshot) => {
           const playersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Player));
           // Filter: Show active players OR players who already have stats for this match
           setPlayers(playersData);
@@ -96,7 +88,7 @@ export default function MatchStats() {
 
         // Fetch Stats
         const statsQuery = query(collection(db, 'playerStats'), where('matchId', '==', matchId));
-        const statsUnsub = onSnapshot(statsQuery, (snapshot) => {
+        onSnapshot(statsQuery, (snapshot) => {
           const statsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlayerStat));
           setStats(statsData);
           
@@ -147,10 +139,6 @@ export default function MatchStats() {
         [playerId]: updated
       };
     });
-  };
-
-  const updateOpponentScore = (delta: number) => {
-    setScoreOpponent(prev => Math.max(0, prev + delta));
   };
 
   const handleSave = async (shouldFinalize: boolean = false) => {

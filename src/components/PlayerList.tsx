@@ -1,9 +1,7 @@
 import React from 'react';
 import { 
-  Plus, 
   Search, 
   Edit2, 
-  Trash2, 
   UserPlus,
   Shield,
   Sword,
@@ -56,6 +54,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { uploadImage } from '../lib/imageUpload';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 
 interface PlayerListProps {
   players: Player[];
@@ -85,11 +84,13 @@ const positionColors: Record<Position, string> = {
  * Componente para mostrar y gestionar la lista de jugadores.
  * Permite añadir, editar y eliminar jugadores, así como ver sus estadísticas.
  */
-export default function PlayerList({ players, stats, matches, seasons, onAddPlayer, onUpdatePlayer, onDeletePlayer }: PlayerListProps) {
+export default function PlayerList({ players, stats, matches, seasons, onAddPlayer, onUpdatePlayer }: PlayerListProps) {
+  const navigate = useNavigate();
   const [viewMode, setViewMode] = React.useState<'grid' | 'table'>('table');
   const [searchTerm, setSearchTerm] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<'active' | 'inactive' | 'all'>('active');
   const [positionFilter, setPositionFilter] = React.useState<Position | 'all'>('all');
+  const [seasonFilter, setSeasonFilter] = React.useState<string>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = React.useState(false);
   const [editingPlayer, setEditingPlayer] = React.useState<Player | null>(null);
   const [viewingPlayer, setViewingPlayer] = React.useState<Player | null>(null);
@@ -139,39 +140,44 @@ React.useEffect(() => {
   };
 
   const calculateRating = (playerId: string) => {
-    const playerStats = stats.filter(s => s.playerId === playerId);
-    if (playerStats.length === 0) return 0;
+    const playerStats = stats.filter(s => s.playerId === playerId && (seasonFilter === 'all' || s.seasonId === seasonFilter));
+    const matchesPlayed = playerStats.length;
+    if (matchesPlayed === 0) return "0.0";
 
-    let score = 0;
-    let gamesPlayed = 0;
+    const completedMatches = matches.filter(m => m.status === 'completed' && (seasonFilter === 'all' || m.seasonId === seasonFilter));
+    const wins = completedMatches.filter(m => m.scoreTeam! > m.scoreOpponent!).length;
+    const draws = completedMatches.filter(m => m.scoreTeam! === m.scoreOpponent!).length;
+    const teamWinRate = completedMatches.length > 0
+      ? ((wins + draws * 0.5) / completedMatches.length) * 10
+      : 0;
 
-    playerStats.forEach(s => {
-      if (s.attendance === 'attending') {
-        gamesPlayed++;
-        score += 2; // Base for attending
+    const totalGoals = playerStats.reduce((acc, s) => acc + (s.goals || 0), 0);
+    const totalAssists = playerStats.reduce((acc, s) => acc + (s.assists || 0), 0);
+    const totalYellow = playerStats.reduce((acc, s) => acc + (s.yellowCards || 0), 0);
+    const totalRed = playerStats.reduce((acc, s) => acc + (s.redCards || 0), 0);
 
-        // Add points for match result
-        const match = matches.find(m => m.id === s.matchId);
-        if (match && match.status === 'completed' && match.scoreTeam !== undefined && match.scoreOpponent !== undefined) {
-          if (match.scoreTeam > match.scoreOpponent) {
-            score += 3; // Win
-          } else if (match.scoreTeam === match.scoreOpponent) {
-            score += 1; // Draw
-          }
-        }
-      }
-      score += (s.goals || 0) * 3;
-      score += (s.assists || 0) * 2;
-      score -= (s.yellowCards || 0) * 1;
-      score -= (s.redCards || 0) * 3;
-    });
+    // 1. Rendimiento Estadístico (Peso 40%)
+    const statsScore = (totalGoals * 2.0 + totalAssists * 1.0 - totalYellow * 1.0 - totalRed * 3.0);
+    const avgStats = statsScore / matchesPlayed;
+    const normStats = Math.min(Math.max((avgStats + 2) * 2, 0), 10);
 
-    if (gamesPlayed === 0) return 0;
-    return (score / gamesPlayed).toFixed(1);
+    // 2. Compromiso (Peso 40%)
+    const attending = playerStats.filter(s => s.attendance === 'attending').length;
+    const notAttending = playerStats.filter(s => s.attendance === 'notAttending').length;
+    const noResponse = playerStats.filter(s => s.attendance === 'noResponse').length;
+    const totalInvited = attending + notAttending + noResponse;
+    
+    const attendanceScore = (attending * 1.0 + notAttending * (-0.5) + noResponse * (-1.0));
+    const avgAttendance = totalInvited > 0 ? attendanceScore / totalInvited : 0;
+    const normAttendance = Math.min(Math.max((avgAttendance + 1) * 5, 0), 10);
+
+    // 3. Éxito Colectivo (Peso 20%)
+    const ir = (normStats * 0.4) + (normAttendance * 0.4) + (teamWinRate * 0.2);
+    return ir.toFixed(1);
   };
 
   const getPlayerStatsBySeason = (playerId: string) => {
-    const playerStats = stats.filter(s => s.playerId === playerId);
+    const playerStats = stats.filter(s => s.playerId === playerId && (seasonFilter === 'all' || s.seasonId === seasonFilter));
     const statsBySeason: Record<string, { 
       matches: number, 
       goals: number, 
@@ -222,7 +228,8 @@ React.useEffect(() => {
       statusFilter === 'active' ? (p.isActive !== false) :
       (p.isActive === false);
     const matchesPosition = positionFilter === 'all' ? true : p.position === positionFilter;
-    return matchesSearch && matchesStatus && matchesPosition;
+    const matchesSeason = seasonFilter === 'all' ? true : p.seasonIds?.includes(seasonFilter);
+    return matchesSearch && matchesStatus && matchesPosition && matchesSeason;
   });
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -395,49 +402,67 @@ React.useEffect(() => {
         </Dialog>
       </header>
 
-      <div className="flex flex-col sm:flex-row gap-4 mb-6">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-          <Input 
-            placeholder="Buscar por nombre..." 
-            className="pl-10 h-12 bg-white border-none shadow-sm rounded-xl"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <div className="w-full sm:w-48">
-          <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
-            <SelectTrigger className="h-12 bg-white border-none shadow-sm rounded-xl">
-              <SelectValue>
-                {statusFilter === 'active' ? 'Solo Activos' : 
-                statusFilter === 'inactive' ? 'Solo Bajas' : 
-                'Todos los estados'}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent className="rounded-xl border-none shadow-xl">
-              <SelectItem value="active">Solo Activos</SelectItem>
-              <SelectItem value="inactive">Solo Bajas</SelectItem>
-              <SelectItem value="all">Todos los estados</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="w-full sm:w-48">
-          <Select value={positionFilter} onValueChange={(v: any) => setPositionFilter(v)}>
-            <SelectTrigger className="h-12 bg-white border-none shadow-sm rounded-xl">
-              <SelectValue>
-                {positionFilter === 'all' ? 'Todas las posiciones' : positionFilter}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent className="rounded-xl border-none shadow-xl">
-              <SelectItem value="all">Todas las posiciones</SelectItem>
-              <SelectItem value="Portero">Portero</SelectItem>
-              <SelectItem value="Defensa">Defensa</SelectItem>
-              <SelectItem value="Medio">Medio</SelectItem>
-              <SelectItem value="Delantero">Delantero</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex bg-white rounded-xl shadow-sm p-1">
+        <div className="flex flex-col sm:flex-row gap-4 mb-6 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <Input 
+              placeholder="Buscar por nombre..." 
+              className="pl-10 h-12 bg-white border-none shadow-sm rounded-xl"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="w-full sm:w-48">
+            <Select value={seasonFilter} onValueChange={setSeasonFilter}>
+              <SelectTrigger className="h-12 bg-white border-none shadow-sm rounded-xl">
+                <SelectValue>
+                  {seasonFilter === 'all' 
+                    ? 'Todas las temporadas' 
+                    : seasons.find(s => s.id === seasonFilter)?.name || 'Temporada'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-none shadow-xl">
+                <SelectItem value="all">Todas las temporadas</SelectItem>
+                {seasons.map(s => (
+                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-full sm:w-48">
+            <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
+              <SelectTrigger className="h-12 bg-white border-none shadow-sm rounded-xl">
+                <SelectValue>
+                  {statusFilter === 'active' ? 'Solo Activos' : 
+                  statusFilter === 'inactive' ? 'Solo Bajas' : 
+                  'Todos los estados'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-none shadow-xl">
+                <SelectItem value="all">Todos los estados</SelectItem>
+                <SelectItem value="active">Solo Activos</SelectItem>
+                <SelectItem value="inactive">Solo Bajas</SelectItem>
+                
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="w-full sm:w-48">
+            <Select value={positionFilter} onValueChange={(v: any) => setPositionFilter(v)}>
+              <SelectTrigger className="h-12 bg-white border-none shadow-sm rounded-xl">
+                <SelectValue>
+                  {positionFilter === 'all' ? 'Todas las posiciones' : positionFilter}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-none shadow-xl">
+                <SelectItem value="all">Todas las posiciones</SelectItem>
+                <SelectItem value="Portero">Portero</SelectItem>
+                <SelectItem value="Defensa">Defensa</SelectItem>
+                <SelectItem value="Medio">Medio</SelectItem>
+                <SelectItem value="Delantero">Delantero</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex bg-white rounded-xl shadow-sm p-1">
           <Button 
             variant={viewMode === 'grid' ? 'default' : 'ghost'} 
             size="icon" 
@@ -699,6 +724,9 @@ React.useEffect(() => {
                                 <div className="flex items-center justify-end gap-2">
                                   <span className="text-lg font-black text-emerald-600">{calculateRating(player.id)}</span>
                                   <div className="flex gap-1">
+                                    <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setEditingPlayer(player); }} className="h-8 w-8 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg">
+                                      <Edit2 size={14} />
+                                    </Button>
                                     <Button 
                                       variant="ghost" 
                                       size="icon" 
@@ -736,116 +764,11 @@ React.useEffect(() => {
               )}
             </div>
           </div>
-
-          {/* Side Panel for Stats */}
-          {viewingPlayer && (
-            <div className="w-full lg:w-80 bg-white rounded-2xl shadow-sm overflow-y-auto border border-gray-100 h-fit lg:sticky lg:top-6">
-              {(() => {
-                const statsBySeason = getPlayerStatsBySeason(viewingPlayer.id);
-                const totalStats = Object.values(statsBySeason).reduce((acc, curr) => ({
-                  matches: acc.matches + curr.matches,
-                  goals: acc.goals + curr.goals,
-                  assists: acc.assists + curr.assists,
-                  yellowCards: acc.yellowCards + curr.yellowCards,
-                  redCards: acc.redCards + curr.redCards,
-                  wins: acc.wins + curr.wins,
-                  draws: acc.draws + curr.draws,
-                  losses: acc.losses + curr.losses,
-                }), { matches: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0, wins: 0, draws: 0, losses: 0 });
-
-                return (
-                  <div className="p-6">
-                    <div className="flex justify-between items-start mb-6">
-                      <div className="flex items-center gap-4">
-                        <Avatar className="h-16 w-16 border-2 border-emerald-50 rounded-2xl">
-                          <AvatarImage src={viewingPlayer.photoUrl} className="object-cover rounded-2xl" />
-                          <AvatarFallback className="bg-emerald-50 text-emerald-700 font-bold text-xl rounded-2xl">
-                            {viewingPlayer.firstName[0]}{viewingPlayer.lastName[0]}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <h3 className="font-bold text-lg leading-tight">
-                            {viewingPlayer.alias || `${viewingPlayer.firstName} ${viewingPlayer.lastName}`}
-                          </h3>
-                          <Badge variant="secondary" className={cn("mt-1 rounded-lg px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider", positionColors[viewingPlayer.position])}>
-                            {viewingPlayer.position}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => setEditingPlayer(viewingPlayer)} className="h-8 w-8 text-gray-400 hover:text-emerald-600">
-                          <Edit2 size={14} />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => setViewingPlayer(null)} className="h-8 w-8 text-gray-400 hover:text-red-500">
-                          <X size={14} />
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="space-y-6">
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Totales</h4>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="bg-gray-50 p-3 rounded-xl text-center">
-                            <p className="text-[10px] text-gray-500 uppercase font-bold">Partidos</p>
-                            <p className="text-xl font-black text-gray-900">{totalStats.matches}</p>
-                          </div>
-                          <div className="bg-emerald-50 p-3 rounded-xl text-center">
-                            <p className="text-[10px] text-emerald-600 uppercase font-bold">Goles</p>
-                            <p className="text-xl font-black text-emerald-700">{totalStats.goals}</p>
-                          </div>
-                          <div className="bg-blue-50 p-3 rounded-xl text-center">
-                            <p className="text-[10px] text-blue-600 uppercase font-bold">Asist.</p>
-                            <p className="text-xl font-black text-blue-700">{totalStats.assists}</p>
-                          </div>
-                          <div className="bg-yellow-50 p-3 rounded-xl text-center">
-                            <p className="text-[10px] text-yellow-600 uppercase font-bold">Tarjetas</p>
-                            <p className="text-xl font-black text-yellow-700">{totalStats.yellowCards + totalStats.redCards}</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div>
-                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Por Temporada</h4>
-                        {Object.keys(statsBySeason).length > 0 ? (
-                          <div className="space-y-2">
-                            {Object.entries(statsBySeason).map(([seasonId, s]) => {
-                              const season = seasons.find(se => se.id === seasonId);
-                              return (
-                                <div key={seasonId} className="p-3 border rounded-xl bg-gray-50/50">
-                                  <span className="font-bold text-sm block mb-2">{season?.name || 'Temporada Desconocida'}</span>
-                                  <div className="flex justify-between text-[10px] border-t border-gray-100 pt-2 mt-2">
-                                    <span className="text-emerald-600">V: <strong className="text-emerald-700">{s.wins}</strong></span>
-                                    <span className="text-gray-500">E: <strong className="text-gray-900">{s.draws}</strong></span>
-                                    <span className="text-red-600">D: <strong className="text-red-700">{s.losses}</strong></span>
-                                  </div>
-                                  <div className="flex justify-between text-[10px] mt-1">
-                                    <span className="text-gray-500">PJ: <strong className="text-gray-900">{s.matches}</strong></span>
-                                    <span className="text-emerald-600">G: <strong className="text-emerald-700">{s.goals}</strong></span>
-                                    <span className="text-blue-600">A: <strong className="text-blue-700">{s.assists}</strong></span>
-                                    <span className="text-yellow-600">TA: <strong className="text-yellow-700">{s.yellowCards}</strong></span>
-                                    <span className="text-red-600">TR: <strong className="text-red-700">{s.redCards}</strong></span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <p className="text-gray-500 text-xs italic">Sin estadísticas registradas.</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          )}
         </div>
       )}
 
-      {/* Player Details Dialog (Only for Grid View) */}
-      {viewMode === 'grid' && (
-        <Dialog open={!!viewingPlayer} onOpenChange={(open) => !open && setViewingPlayer(null)}>
+      {/* Player Details Dialog */}
+      <Dialog open={!!viewingPlayer} onOpenChange={(open) => !open && setViewingPlayer(null)}>
           <DialogContent className="sm:max-w-[600px] rounded-2xl">
             {viewingPlayer && (() => {
               const statsBySeason = getPlayerStatsBySeason(viewingPlayer.id);
@@ -967,13 +890,21 @@ React.useEffect(() => {
                         <p className="text-gray-500 text-sm italic">No hay estadísticas registradas para este jugador.</p>
                       )}
                     </div>
+                    
+                    <div className="mt-4 pt-4 border-t border-gray-100">
+                      <Button 
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl"
+                        onClick={() => navigate(`/players/${viewingPlayer.id}`)}
+                      >
+                        Ver Perfil Completo
+                      </Button>
+                    </div>
                   </div>
                 </>
               );
             })()}
           </DialogContent>
         </Dialog>
-      )}
     </div>
   );
 }

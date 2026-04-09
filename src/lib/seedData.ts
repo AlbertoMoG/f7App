@@ -1,4 +1,4 @@
-import { collection, addDoc, getDocs, writeBatch, doc } from 'firebase/firestore';
+import { collection, addDoc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Position, Attendance, MatchStatus } from '../types';
 
@@ -74,7 +74,7 @@ export const seedDatabase = async () => {
       round: 'Octavos de Final'
     });
 
-    const match3Ref = await addDoc(collection(db, 'matches'), {
+    await addDoc(collection(db, 'matches'), {
       seasonId: currentSeasonId,
       date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(), // in 2 days
       opponentId: opp3Ref.id,

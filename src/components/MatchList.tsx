@@ -3,27 +3,26 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Plus, 
   Calendar, 
-  Edit2, 
   Trash2, 
   Clock, 
   ChevronDown,
   ChevronUp,
   Trophy,
   Star,
-  ShieldAlert,
   Users,
   LayoutGrid,
   List as ListIcon,
-  Filter,
   Instagram,
   Download,
-  Share2,
   X,
-  MapPin
+  MapPin,
+  ExternalLink,
+  ClipboardList,
+  Pencil
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { 
@@ -33,11 +32,12 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
-import { Player, Match, PlayerStat, Season, Opponent, MatchType, Team } from '../types';
+import { Player, Match, PlayerStat, Season, Opponent, Team, Field } from '../types';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface MatchListProps {
   team: Team | null;
@@ -46,6 +46,7 @@ interface MatchListProps {
   stats: PlayerStat[];
   seasons: Season[];
   opponents: Opponent[];
+  fields: Field[];
   onUpdateMatch: (match: Match) => void;
   onDeleteMatch: (id: string) => void;
   onUpdateStats: (stats: PlayerStat[]) => void;
@@ -62,15 +63,16 @@ export default function MatchList({
   stats, 
   seasons, 
   opponents, 
-  onUpdateMatch, 
+  fields,
   onDeleteMatch,
-  onUpdateStats
 }: MatchListProps) {
   const navigate = useNavigate();
   const [filterOpponent, setFilterOpponent] = React.useState<string>('all');
   const [filterSeason, setFilterSeason] = React.useState<string>('all');
   const [filterType, setFilterType] = React.useState<string>('all');
   const [filterMonth, setFilterMonth] = React.useState<string>('all');
+  const [filterYear, setFilterYear] = React.useState<string>('all');
+  const [filterStatus, setFilterStatus] = React.useState<string>('all');
   const [viewMode, setViewMode] = React.useState<'list' | 'compact'>('list');
   const [expandedMatchId, setExpandedMatchId] = React.useState<string | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = React.useState(false);
@@ -90,6 +92,16 @@ export default function MatchList({
     { value: '10', label: 'Noviembre' },
     { value: '11', label: 'Diciembre' },
   ];
+
+  const years = Array.from(new Set(matches.map(m => new Date(m.date).getFullYear().toString()))).sort((a, b) => parseInt(b) - parseInt(a));
+
+  const handleShareClick = () => {
+    if (filterMonth === 'all' || filterYear === 'all') {
+      toast.error('Por favor, selecciona tanto un mes como un año para compartir.');
+      return;
+    }
+    setIsShareModalOpen(true);
+  };
 
   const downloadInstagramPost = async () => {
     if (instagramPostRef.current === null) return;
@@ -116,7 +128,9 @@ export default function MatchList({
     const matchSeason = filterSeason === 'all' || m.seasonId === filterSeason;
     const matchTypeFilter = filterType === 'all' || m.type === filterType;
     const matchMonth = filterMonth === 'all' || date.getMonth().toString() === filterMonth;
-    return matchOpponent && matchSeason && matchTypeFilter && matchMonth;
+    const matchYear = filterYear === 'all' || date.getFullYear().toString() === filterYear;
+    const matchStatus = filterStatus === 'all' || m.status === filterStatus;
+    return matchOpponent && matchSeason && matchTypeFilter && matchMonth && matchYear && matchStatus;
   }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   // Group matches by month for compact view
@@ -135,16 +149,14 @@ export default function MatchList({
           <p className="text-gray-500">Registra resultados y estadísticas individuales.</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
-          {filterMonth !== 'all' && (
-            <Button 
-              onClick={() => setIsShareModalOpen(true)}
-              variant="outline"
-              className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 rounded-xl h-11 px-6"
-            >
-              <Instagram size={18} className="mr-2" />
-              Compartir Mes
-            </Button>
-          )}
+          <Button 
+            onClick={handleShareClick}
+            variant="outline"
+            className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 rounded-xl h-11 px-6"
+          >
+            <Instagram size={18} className="mr-2" />
+            Compartir Mes
+          </Button>
           <Button 
             onClick={() => navigate('/matches/new')}
             className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl h-11 px-6"
@@ -213,6 +225,24 @@ export default function MatchList({
             </Select>
           </div>
 
+          {/* Filtro de Año */}
+          <div className="flex-1 min-w-[150px]">
+            <Label className="text-[10px] uppercase font-bold text-gray-400 ml-1">Año</Label>
+            <Select value={filterYear} onValueChange={setFilterYear}>
+              <SelectTrigger className="border-none bg-gray-50 rounded-xl h-10 mt-1">
+                <SelectValue>
+                  {filterYear === 'all' 
+                    ? 'Todos los años' 
+                    : filterYear || <span className="text-gray-400">Todos los años</span>}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los años</SelectItem>
+                {years.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Filtro de Tipo */}
           <div className="flex-1 min-w-[150px]">
             <Label className="text-[10px] uppercase font-bold text-gray-400 ml-1">Tipo</Label>
@@ -231,6 +261,26 @@ export default function MatchList({
                 <SelectItem value="friendly">Amistosos</SelectItem>
                 <SelectItem value="league">Liga</SelectItem>
                 <SelectItem value="cup">Copa</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Filtro de Estado */}
+          <div className="flex-1 min-w-[150px]">
+            <Label className="text-[10px] uppercase font-bold text-gray-400 ml-1">Estado</Label>
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger className="border-none bg-gray-50 rounded-xl h-10 mt-1">
+                <SelectValue>
+                  {filterStatus === 'all' ? 'Todos' :
+                  filterStatus === 'completed' ? 'Jugados' :
+                  filterStatus === 'scheduled' ? 'Pendientes' :
+                  <span className="text-gray-400">Todos</span>}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="completed">Jugados</SelectItem>
+                <SelectItem value="scheduled">Pendientes</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -267,7 +317,6 @@ export default function MatchList({
             const isCompleted = match.status === 'completed';
             const isWin = isCompleted && (match.scoreTeam || 0) > (match.scoreOpponent || 0);
             const isLoss = isCompleted && (match.scoreTeam || 0) < (match.scoreOpponent || 0);
-            const isDraw = isCompleted && (match.scoreTeam || 0) === (match.scoreOpponent || 0);
 
             return (
               <motion.div
@@ -307,10 +356,31 @@ export default function MatchList({
                           </p>
                           <p className="text-xs text-gray-500 flex items-center gap-1.5">
                             <Clock size={12} /> {format(new Date(match.date), 'HH:mm')}
-                            {match.location && (
+                            {(match.fieldId || match.location) && (
                               <>
                                 <span className="text-gray-300">•</span>
-                                <MapPin size={12} /> {match.location}
+                                <MapPin size={12} className="text-emerald-600" /> 
+                                {match.fieldId ? (
+                                  (() => {
+                                    const field = fields.find(f => f.id === match.fieldId);
+                                    return field?.location ? (
+                                      <a 
+                                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(field.location)}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md hover:bg-emerald-100 transition-colors font-bold border border-emerald-100"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        {field.name}
+                                        <ExternalLink size={10} />
+                                      </a>
+                                    ) : (
+                                      <span className="font-bold text-gray-700">{field?.name || 'Campo desconocido'}</span>
+                                    );
+                                  })()
+                                ) : (
+                                  <span className="font-medium text-gray-600">{match.location}</span>
+                                )}
                               </>
                             )}
                             <span className="text-gray-300">•</span> {season?.name}
@@ -400,10 +470,20 @@ export default function MatchList({
                             size="icon" 
                             onClick={() => navigate(`/matches/${match.id}/stats`)}
                             className="h-10 w-10 rounded-xl hover:bg-emerald-50 hover:text-emerald-600"
+                            title="Convocatoria y Estadísticas"
                           >
-                            <Edit2 size={18} />
+                            <ClipboardList size={18} />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => onDeleteMatch(match.id)} className="h-10 w-10 rounded-xl hover:bg-red-50 hover:text-red-500">
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => navigate(`/matches/${match.id}/edit`)}
+                            className="h-10 w-10 rounded-xl hover:bg-emerald-50 hover:text-emerald-600"
+                            title="Editar Partido"
+                          >
+                            <Pencil size={18} />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => onDeleteMatch(match.id)} className="h-10 w-10 rounded-xl hover:bg-red-50 hover:text-red-500" title="Eliminar Partido">
                             <Trash2 size={18} />
                           </Button>
                         </div>
@@ -523,7 +603,6 @@ export default function MatchList({
                     const isCompleted = match.status === 'completed';
                     const isWin = isCompleted && (match.scoreTeam || 0) > (match.scoreOpponent || 0);
                     const isLoss = isCompleted && (match.scoreTeam || 0) < (match.scoreOpponent || 0);
-                    const isDraw = isCompleted && (match.scoreTeam || 0) === (match.scoreOpponent || 0);
 
                     return (
                       <Card 
@@ -540,9 +619,30 @@ export default function MatchList({
                               <span className="text-xs font-bold text-gray-500 flex items-center gap-1">
                                 <Clock size={10} /> {format(new Date(match.date), 'HH:mm')}
                               </span>
-                              {match.location && (
-                                <span className="text-[10px] text-gray-400 truncate max-w-[120px] flex items-center gap-1">
-                                  <MapPin size={10} /> {match.location}
+                              {(match.fieldId || match.location) && (
+                                <span className="text-[10px] text-gray-400 truncate max-w-[150px] flex items-center gap-1">
+                                  <MapPin size={10} className="text-emerald-600 shrink-0" /> 
+                                  {match.fieldId ? (
+                                    (() => {
+                                      const field = fields.find(f => f.id === match.fieldId);
+                                      return field?.location ? (
+                                        <a 
+                                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(field.location)}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded-md hover:bg-emerald-100 transition-colors font-bold border border-emerald-100 truncate"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <span className="truncate">{field.name}</span>
+                                          <ExternalLink size={8} className="shrink-0" />
+                                        </a>
+                                      ) : (
+                                        <span className="font-bold text-gray-600 truncate">{field?.name || 'Campo desconocido'}</span>
+                                      );
+                                    })()
+                                  ) : (
+                                    <span className="truncate">{match.location}</span>
+                                  )}
                                 </span>
                               )}
                             </div>
@@ -610,6 +710,36 @@ export default function MatchList({
                               </span>
                             </div>
                           </div>
+                          
+                          <div className="mt-3 pt-3 border-t border-gray-50 flex justify-end gap-2">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={(e) => { e.stopPropagation(); navigate(`/matches/${match.id}/stats`); }}
+                              className="h-8 w-8 rounded-lg hover:bg-emerald-50 hover:text-emerald-600"
+                              title="Convocatoria y Estadísticas"
+                            >
+                              <ClipboardList size={14} />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={(e) => { e.stopPropagation(); navigate(`/matches/${match.id}/edit`); }}
+                              className="h-8 w-8 rounded-lg hover:bg-emerald-50 hover:text-emerald-600"
+                              title="Editar Partido"
+                            >
+                              <Pencil size={14} />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={(e) => { e.stopPropagation(); onDeleteMatch(match.id); }}
+                              className="h-8 w-8 rounded-lg hover:bg-red-50 hover:text-red-500"
+                              title="Eliminar Partido"
+                            >
+                              <Trash2 size={14} />
+                            </Button>
+                          </div>
                         </CardContent>
                       </Card>
                     );
@@ -645,10 +775,10 @@ export default function MatchList({
             </div>
 
             <div className="p-8 bg-gray-100 flex justify-center">
-              {/* Instagram Post Container (1080x1080 aspect ratio simulated) */}
+              {/* Instagram Post Container (1080x1350 aspect ratio simulated) */}
               <div 
                 ref={instagramPostRef}
-                className="w-[400px] h-[400px] bg-emerald-900 text-white p-8 flex flex-col relative overflow-hidden shadow-xl"
+                className="w-[400px] h-[500px] bg-emerald-900 text-white p-10 flex flex-col relative overflow-hidden shadow-xl"
                 style={{ backgroundImage: 'radial-gradient(circle at top right, #065f46, #064e3b)' }}
               >
                 {/* Decorative Elements */}
@@ -676,34 +806,36 @@ export default function MatchList({
                     {filteredMatches.slice(0, 5).map((m) => {
                       const opp = opponents.find(o => o.id === m.opponentId);
                       return (
-                        <div key={m.id} className="bg-white/10 backdrop-blur-md border border-white/10 p-3 rounded-2xl flex items-center gap-4">
-                          <div className="flex flex-col items-center min-w-[45px] border-r border-white/10 pr-3">
-                            <span className="text-lg font-black leading-none">{format(new Date(m.date), 'dd')}</span>
-                            <span className="text-[9px] font-bold uppercase text-emerald-400">{format(new Date(m.date), 'EEE', { locale: es })}</span>
+                        <div key={m.id} className="bg-white/5 backdrop-blur-sm border border-white/5 p-2 rounded-xl flex items-center gap-3">
+                          <div className="flex flex-col items-center min-w-[30px] border-r border-white/10 pr-2">
+                            <span className="text-sm font-black leading-none">{format(new Date(m.date), 'dd')}</span>
+                            <span className="text-[6px] font-bold uppercase text-emerald-400">{format(new Date(m.date), 'EEE', { locale: es })}</span>
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-0.5">
-                              <Badge className="text-[8px] h-4 px-1.5 bg-emerald-500/20 text-emerald-300 border-none font-black uppercase">
+                            <p className="text-[10px] font-black truncate uppercase leading-tight">
+                              {m.isHome !== false ? 'vs ' : '@ '}{opp?.name || 'RIVAL'}
+                            </p>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <Badge className="text-[6px] h-2.5 px-1 bg-emerald-500/20 text-emerald-300 border-none font-black uppercase">
                                 {m.type === 'league' ? 'Liga' : m.type === 'cup' ? 'Copa' : 'Amistoso'}
                               </Badge>
-                              {m.round && (
-                                <span className="text-[8px] font-bold text-white/40 uppercase">
-                                  {m.type === 'league' ? ` ${m.round}` : ` ${m.round}`}
+                              {(m.fieldId || m.location) && (
+                                <span className="text-[6px] font-bold text-white/50 truncate flex items-center gap-0.5">
+                                  <MapPin size={6} className="text-emerald-400" /> 
+                                  {m.fieldId ? (
+                                    (() => {
+                                      const field = fields.find(f => f.id === m.fieldId);
+                                      return field?.name || 'Campo desconocido';
+                                    })()
+                                  ) : (
+                                    m.location
+                                  )}
                                 </span>
                               )}
                             </div>
-                            <p className="text-sm font-black truncate uppercase leading-tight">
-                              {m.isHome !== false ? 'vs ' : '@ '}{opp?.name || 'RIVAL'}
-                            </p>
-                            {m.location && (
-                              <p className="text-[9px] font-bold text-white/50 truncate flex items-center gap-1 mt-0.5">
-                                <MapPin size={8} /> {m.location}
-                              </p>
-                            )}
                           </div>
                           <div className="text-right">
-                            <p className="text-xs font-black">{format(new Date(m.date), 'HH:mm')}</p>
-                            <p className="text-[8px] font-bold text-white/40 uppercase">Hora Local</p>
+                            <p className="text-[9px] font-black">{format(new Date(m.date), 'HH:mm')}</p>
                           </div>
                         </div>
                       );

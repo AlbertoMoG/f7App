@@ -34,6 +34,13 @@ export interface Opponent {
   seasonIds?: string[];
 }
 
+export interface Field {
+  id: string;
+  name: string;
+  location?: string; // Google Maps coordinates or address
+  mapUrl?: string; // Computed or stored Google Maps URL
+}
+
 export type MatchType = 'friendly' | 'league' | 'cup';
 
 export interface Match {
@@ -41,13 +48,14 @@ export interface Match {
   seasonId: string;
   date: string;
   opponentId: string;
-  scoreTeam?: number;
-  scoreOpponent?: number;
+  scoreTeam?: number | null;
+  scoreOpponent?: number | null;
   status: MatchStatus;
-  type?: MatchType;
-  round?: string;
-  isHome?: boolean;
-  location?: string;
+  type?: MatchType | null;
+  round?: string | null;
+  isHome?: boolean | null;
+  location?: string | null;
+  fieldId?: string | null;
 }
 
 export interface PlayerStat {
@@ -74,5 +82,7 @@ export interface Lineup {
   name: string;
   formation: string;
   slots: LineupSlot[];
+  matchId?: string;
+  benchPlayerIds?: string[];
   createdAt: string;
 }

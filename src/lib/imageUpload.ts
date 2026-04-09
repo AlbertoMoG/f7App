@@ -42,7 +42,7 @@ export const compressImage = (file: File, maxWidth = 400, maxHeight = 400, quali
   });
 };
 
-export const uploadImage = async (file: File, path: string): Promise<string> => {
+export const uploadImage = async (file: File, _path: string): Promise<string> => {
   try {
     // En lugar de usar Firebase Storage (que requiere configuración adicional),
     // guardamos la imagen comprimida en Base64 directamente en Firestore.

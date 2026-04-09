@@ -10,7 +10,8 @@ import {
   ChevronRight,
   Menu,
   X,
-  Shield
+  Shield,
+  ShieldAlert
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -33,7 +34,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, team, 
     { id: 'players', label: 'Jugadores', icon: Users },
     { id: 'matches', label: 'Partidos', icon: Calendar },
     { id: 'simulator', label: 'Simulador', icon: Trophy },
-    { id: 'seasons', label: 'Temporadas', icon: Settings },
+    { id: 'settings', label: 'Configuraciones', icon: Settings },
   ];
 
   return (

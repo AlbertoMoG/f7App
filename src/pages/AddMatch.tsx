@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Season, Opponent, MatchType, Match } from '../types';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Season, Opponent, MatchType, Match, Field } from '../types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -19,11 +19,17 @@ import { toast } from 'sonner';
 interface AddMatchProps {
   seasons: Season[];
   opponents: Opponent[];
-  onAddMatch: (match: Omit<Match, 'id'>) => Promise<any>;
+  fields: Field[];
+  matches?: Match[];
+  onAddMatch?: (match: Omit<Match, 'id'>) => Promise<any>;
+  onUpdateMatch?: (match: Match) => Promise<any>;
 }
 
-export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchProps) {
+export default function AddMatch({ seasons, opponents, fields, matches, onAddMatch, onUpdateMatch }: AddMatchProps) {
   const navigate = useNavigate();
+  const { matchId } = useParams();
+  const isEditing = !!matchId;
+  const matchToEdit = isEditing && matches ? matches.find(m => m.id === matchId) : null;
 
   const [seasonId, setSeasonId] = useState<string>('');
   const [opponentId, setOpponentId] = useState<string>('');
@@ -32,46 +38,90 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
   const [round, setRound] = useState<string>('');
   const [date, setDate] = useState<string>('');
   const [location, setLocation] = useState<string>('');
+  const [fieldId, setFieldId] = useState<string>('');
+  const [status, setStatus] = useState<string>('scheduled');
+  const [scoreTeam, setScoreTeam] = useState<number | ''>('');
+  const [scoreOpponent, setScoreOpponent] = useState<number | ''>('');
 
   // Precargar datos iniciales
   useEffect(() => {
-    if (seasons.length > 0 && !seasonId) {
-      const currentYear = new Date().getFullYear().toString();
-      const currentSeason = seasons.find(s => s.name.includes(currentYear))?.id || seasons[0].id;
-      setSeasonId(currentSeason);
+    if (isEditing && matchToEdit) {
+      setSeasonId(matchToEdit.seasonId);
+      setOpponentId(matchToEdit.opponentId);
+      setType(matchToEdit.type || 'friendly');
+      setIsHome(matchToEdit.isHome !== false ? 'true' : 'false');
+      setRound(matchToEdit.round || '');
+      setDate(matchToEdit.date ? matchToEdit.date.slice(0, 16) : '');
+      setLocation(matchToEdit.location || '');
+      setFieldId(matchToEdit.fieldId || '');
+      setStatus(matchToEdit.status || 'scheduled');
+      setScoreTeam(matchToEdit.scoreTeam ?? '');
+      setScoreOpponent(matchToEdit.scoreOpponent ?? '');
+    } else if (!isEditing) {
+      if (seasons.length > 0 && !seasonId) {
+        const currentYear = new Date().getFullYear().toString();
+        const currentSeason = seasons.find(s => s.name.includes(currentYear))?.id || seasons[0].id;
+        setSeasonId(currentSeason);
+      }
+      if (opponents.length > 0 && !opponentId) {
+        setOpponentId(opponents[0].id);
+      }
     }
-  }, [seasons, seasonId]);
-
-  useEffect(() => {
-    if (opponents.length > 0 && !opponentId) {
-      setOpponentId(opponents[0].id);
-    }
-  }, [opponents, opponentId]);
+  }, [seasons, opponents, isEditing, matchToEdit]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!seasonId || !opponentId || !date) return;
 
     try {
-      const matchData: Omit<Match, 'id'> = {
-        seasonId,
-        opponentId,
-        date,
-        status: 'scheduled',
-        type,
-        isHome: isHome === 'true',
-        location,
-      };
-      
-      if (round) {
-        matchData.round = round;
-      }
+      if (isEditing && matchToEdit && onUpdateMatch) {
+        const updatedMatch: Match = {
+          ...matchToEdit,
+          seasonId,
+          opponentId,
+          date: new Date(date).toISOString(),
+          status: status as 'scheduled' | 'completed',
+          type,
+          isHome: isHome === 'true',
+          location: location || null,
+          fieldId: fieldId || null,
+          round: round || null,
+          scoreTeam: scoreTeam !== '' ? Number(scoreTeam) : null,
+          scoreOpponent: scoreOpponent !== '' ? Number(scoreOpponent) : null,
+        };
+        
+        // Remove any remaining undefined fields to be absolutely safe with Firestore
+        Object.keys(updatedMatch).forEach(key => {
+          if ((updatedMatch as any)[key] === undefined) {
+            delete (updatedMatch as any)[key];
+          }
+        });
 
-      await onAddMatch(matchData);
+        await onUpdateMatch(updatedMatch);
+        toast.success('Partido actualizado correctamente');
+      } else if (onAddMatch) {
+        const matchData: Omit<Match, 'id'> = {
+          seasonId,
+          opponentId,
+          date: new Date(date).toISOString(),
+          status: 'scheduled',
+          type,
+          isHome: isHome === 'true',
+          location,
+          fieldId: fieldId || null,
+        };
+        
+        if (round) {
+          matchData.round = round;
+        }
+
+        await onAddMatch(matchData);
+        toast.success('Partido creado correctamente');
+      }
       navigate('/matches');
     } catch (error) {
-      console.error("Error creating match:", error);
-      toast.error('Error al crear el partido');
+      console.error("Error saving match:", error);
+      toast.error('Error al guardar el partido');
     }
   };
 
@@ -107,8 +157,10 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
                   <Calendar size={24} />
                 </div>
                 <div>
-                  <CardTitle className="text-2xl font-black">Programar Partido</CardTitle>
-                  <CardDescription className="text-emerald-100">Añade un nuevo encuentro al calendario de tu equipo.</CardDescription>
+                  <CardTitle className="text-2xl font-black">{isEditing ? 'Editar Partido' : 'Programar Partido'}</CardTitle>
+                  <CardDescription className="text-emerald-100">
+                    {isEditing ? 'Modifica los datos del encuentro.' : 'Añade un nuevo encuentro al calendario de tu equipo.'}
+                  </CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -218,14 +270,79 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Lugar de juego</Label>
-                    <Input 
-                      value={location}
-                      onChange={(e) => setLocation(e.target.value)}
-                      placeholder="Ej: Polideportivo Municipal"
-                      className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
-                    />
+                    <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Campo / Lugar de juego</Label>
+                    <Select value={fieldId} onValueChange={setFieldId}>
+                      <SelectTrigger>
+                        <SelectValue>
+                          {fieldId 
+                            ? fields.find(f => f.id === fieldId)?.name 
+                            : <span className="text-gray-400">Selecciona campo</span>}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Otro / No especificado</SelectItem>
+                        {fields.map((f) => (
+                          <SelectItem key={f.id} value={f.id}>
+                            {f.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
+
+                  {fieldId === 'none' && (
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Lugar personalizado</Label>
+                      <Input 
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        placeholder="Ej: Polideportivo Municipal"
+                        className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
+                      />
+                    </div>
+                  )}
+
+                  {isEditing && (
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Estado</Label>
+                      <Select value={status} onValueChange={setStatus} required>
+                        <SelectTrigger>
+                          <SelectValue>
+                            {status === 'scheduled' ? 'Pendiente' : status === 'completed' ? 'Finalizado' : <span className="text-gray-400">Selecciona estado</span>}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="scheduled">Pendiente</SelectItem>
+                          <SelectItem value="completed">Finalizado</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {isEditing && status === 'completed' && (
+                    <>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Goles a favor</Label>
+                        <Input 
+                          type="number"
+                          min="0"
+                          value={scoreTeam}
+                          onChange={(e) => setScoreTeam(e.target.value !== '' ? parseInt(e.target.value) : '')}
+                          className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Goles en contra</Label>
+                        <Input 
+                          type="number"
+                          min="0"
+                          value={scoreOpponent}
+                          onChange={(e) => setScoreOpponent(e.target.value !== '' ? parseInt(e.target.value) : '')}
+                          className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="pt-6">
@@ -234,7 +351,7 @@ export default function AddMatch({ seasons, opponents, onAddMatch }: AddMatchPro
                     className="w-full h-14 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold text-lg shadow-lg shadow-emerald-100 transition-all hover:scale-[1.01] active:scale-[0.99]"
                   >
                     <Save className="mr-2" size={20} />
-                    Crear Partido
+                    {isEditing ? 'Guardar Cambios' : 'Crear Partido'}
                   </Button>
                 </div>
               </form>
