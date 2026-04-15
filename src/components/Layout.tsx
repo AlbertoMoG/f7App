@@ -11,10 +11,15 @@ import {
   Menu,
   X,
   Shield,
-  ShieldAlert
+  ShieldAlert,
+  ClipboardCheck,
+  DollarSign
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+import { Season } from '../types';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -23,9 +28,12 @@ interface LayoutProps {
   user: any;
   team?: any;
   onLogout: () => void;
+  seasons: Season[];
+  globalSeasonId: string;
+  setGlobalSeasonId: (id: string) => void;
 }
 
-export default function Layout({ children, activeTab, setActiveTab, user, team, onLogout }: LayoutProps) {
+export default function Layout({ children, activeTab, setActiveTab, user, team, onLogout, seasons, globalSeasonId, setGlobalSeasonId }: LayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
 
   const navItems = [
@@ -34,6 +42,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, team, 
     { id: 'players', label: 'Jugadores', icon: Users },
     { id: 'matches', label: 'Partidos', icon: Calendar },
     { id: 'simulator', label: 'Simulador', icon: Trophy },
+    { id: 'treasury', label: 'Tesorería', icon: DollarSign },
     { id: 'settings', label: 'Configuraciones', icon: Settings },
   ];
 
@@ -42,61 +51,93 @@ export default function Layout({ children, activeTab, setActiveTab, user, team, 
       {/* Sidebar */}
       <aside 
         className={cn(
-          "bg-white border-r border-[#141414]/10 transition-all duration-300 flex flex-col",
+          "bg-white border-r border-[#141414]/10 transition-all duration-300 flex flex-col sticky top-0 h-screen z-20",
           isSidebarOpen ? "w-64" : "w-20"
         )}
       >
-        <div className="p-6 flex items-center justify-between">
-          {isSidebarOpen && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="flex items-center gap-2"
+        <div className="p-6 flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            {isSidebarOpen && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex items-center gap-2"
+              >
+                {team?.shieldUrl ? (
+                  <img src={team.shieldUrl} alt="Escudo" className="w-8 h-8 object-cover rounded-full" referrerPolicy="no-referrer" />
+                ) : (
+                  <Shield className="text-emerald-600" size={24} />
+                )}
+                <h1 className="text-lg font-bold tracking-tight truncate max-w-[140px]">
+                  {team?.name || 'Fútbol 7 Mgr'}
+                </h1>
+              </motion.div>
+            )}
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="hover:bg-emerald-50"
             >
-              {team?.shieldUrl ? (
-                <img src={team.shieldUrl} alt="Escudo" className="w-8 h-8 object-cover rounded-full" referrerPolicy="no-referrer" />
-              ) : (
-                <Shield className="text-emerald-600" size={24} />
-              )}
-              <h1 className="text-lg font-bold tracking-tight truncate max-w-[140px]">
-                {team?.name || 'Fútbol 7 Mgr'}
-              </h1>
-            </motion.div>
+              {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
+            </Button>
+          </div>
+
+          {isSidebarOpen && (
+            <div className="w-full">
+              <Select value={globalSeasonId} onValueChange={setGlobalSeasonId}>
+                <SelectTrigger className="w-full bg-gray-50 border-none rounded-xl h-10 font-medium">
+                  <SelectValue>
+                    {globalSeasonId === 'all' 
+                      ? 'Todas las temporadas' 
+                      : seasons.find(s => s.id === globalSeasonId)?.name || 'Temporada'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  <SelectItem value="all">Todas las temporadas</SelectItem>
+                  {seasons.map(s => (
+                    <SelectItem key={s.id} value={s.id}>
+                      <div className="flex flex-col">
+                        <span className="font-bold">{s.name}</span>
+                        {s.division && <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">{s.division}</span>}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           )}
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="hover:bg-emerald-50"
-          >
-            {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
-          </Button>
         </div>
 
-        <nav className="flex-1 px-3 space-y-1">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group",
-                activeTab === item.id 
-                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-200" 
-                  : "hover:bg-emerald-50 text-gray-500 hover:text-emerald-600"
-              )}
-            >
-              <item.icon size={22} className={cn(
-                "transition-transform",
-                activeTab === item.id ? "scale-110" : "group-hover:scale-110"
-              )} />
-              {isSidebarOpen && (
-                <span className="font-medium">{item.label}</span>
-              )}
-              {isSidebarOpen && activeTab === item.id && (
-                <ChevronRight size={16} className="ml-auto opacity-50" />
-              )}
-            </button>
-          ))}
+        <nav className="flex-1 px-3 space-y-1 overflow-y-auto scrollbar-hide">
+          {navItems.map((item) => {
+            const isActive = activeTab === item.id;
+
+            return (
+              <div key={item.id} className="space-y-1">
+                <button
+                  onClick={() => setActiveTab(item.id)}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all group",
+                    isActive
+                      ? "bg-emerald-600 text-white shadow-lg shadow-emerald-200" 
+                      : "hover:bg-emerald-50 text-gray-500 hover:text-emerald-600"
+                  )}
+                >
+                  <item.icon size={22} className={cn(
+                    "transition-transform",
+                    isActive ? "scale-110" : "group-hover:scale-110"
+                  )} />
+                  {isSidebarOpen && (
+                    <span className="font-medium">{item.label}</span>
+                  )}
+                  {isSidebarOpen && isActive && (
+                    <ChevronRight size={16} className="ml-auto opacity-50" />
+                  )}
+                </button>
+              </div>
+            );
+          })}
         </nav>
 
         <div className="p-4 border-t border-[#141414]/10">
@@ -137,8 +178,8 @@ export default function Layout({ children, activeTab, setActiveTab, user, team, 
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto p-8">
-        <div className="max-w-7xl mx-auto">
+      <main className="flex-1 p-2 md:p-3">
+        <div className="max-w-full mx-auto">
           {children}
         </div>
       </main>

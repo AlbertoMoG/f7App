@@ -51,23 +51,41 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
       setType(matchToEdit.type || 'friendly');
       setIsHome(matchToEdit.isHome !== false ? 'true' : 'false');
       setRound(matchToEdit.round || '');
-      setDate(matchToEdit.date ? matchToEdit.date.slice(0, 16) : '');
+      
+      // Convertir ISO string a formato local YYYY-MM-DDTHH:mm
+      if (matchToEdit.date) {
+        const d = new Date(matchToEdit.date);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const hours = String(d.getHours()).padStart(2, '0');
+        const minutes = String(d.getMinutes()).padStart(2, '0');
+        setDate(`${year}-${month}-${day}T${hours}:${minutes}`);
+      } else {
+        setDate('');
+      }
+
       setLocation(matchToEdit.location || '');
       setFieldId(matchToEdit.fieldId || '');
       setStatus(matchToEdit.status || 'scheduled');
       setScoreTeam(matchToEdit.scoreTeam ?? '');
       setScoreOpponent(matchToEdit.scoreOpponent ?? '');
-    } else if (!isEditing) {
-      if (seasons.length > 0 && !seasonId) {
-        const currentYear = new Date().getFullYear().toString();
-        const currentSeason = seasons.find(s => s.name.includes(currentYear))?.id || seasons[0].id;
-        setSeasonId(currentSeason);
-      }
-      if (opponents.length > 0 && !opponentId) {
-        setOpponentId(opponents[0].id);
+    }
+  }, [isEditing, matchToEdit]);
+
+  const filteredOpponents = React.useMemo(() => {
+    if (!seasonId) return [];
+    return opponents.filter(o => !o.seasonIds || o.seasonIds.length === 0 || o.seasonIds.includes(seasonId));
+  }, [opponents, seasonId]);
+
+  useEffect(() => {
+    if (seasonId && opponentId) {
+      const isOpponentValid = filteredOpponents.some(o => o.id === opponentId);
+      if (!isOpponentValid) {
+        setOpponentId('');
       }
     }
-  }, [seasons, opponents, isEditing, matchToEdit]);
+  }, [seasonId, filteredOpponents, opponentId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,7 +118,7 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
         await onUpdateMatch(updatedMatch);
         toast.success('Partido actualizado correctamente');
       } else if (onAddMatch) {
-        const matchData: Omit<Match, 'id'> = {
+        const matchData: Omit<Match, 'id' | 'teamId'> = {
           seasonId,
           opponentId,
           date: new Date(date).toISOString(),
@@ -115,7 +133,7 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
           matchData.round = round;
         }
 
-        await onAddMatch(matchData);
+        await onAddMatch(matchData as any);
         toast.success('Partido creado correctamente');
       }
       navigate('/matches');
@@ -136,7 +154,7 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
 
   return (
     <div className="min-h-screen bg-[#F5F5F0] pb-20">
-      <div className="max-w-3xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto px-2 py-4">
         <Button 
           variant="ghost" 
           onClick={() => navigate('/matches')}
@@ -182,7 +200,10 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
                       <SelectContent>
                         {seasons.map((s) => (
                           <SelectItem key={s.id} value={s.id}>
-                            {s.name}
+                            <div className="flex flex-col">
+                              <span className="font-bold">{s.name}</span>
+                              {s.division && <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">{s.division}</span>}
+                            </div>
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -192,7 +213,7 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
                   {/* 2. SELECTOR DE RIVAL */}
                   <div className="space-y-2">
                     <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Rival</Label>
-                    <Select value={opponentId} onValueChange={setOpponentId} required>
+                    <Select value={opponentId} onValueChange={setOpponentId} required disabled={!seasonId}>
                       <SelectTrigger>
                         <SelectValue>
                           {opponentId 
@@ -201,7 +222,7 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        {opponents.map((o) => (
+                        {filteredOpponents.map((o) => (
                           <SelectItem key={o.id} value={o.id}>
                             {o.name}
                           </SelectItem>
@@ -213,7 +234,7 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
                   {/* 3. SELECTOR DE TIPO */}
                   <div className="space-y-2">
                     <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Tipo de Partido</Label>
-                    <Select value={type} onValueChange={(v: MatchType) => setType(v)} required>
+                    <Select value={type} onValueChange={(v: MatchType) => setType(v)} required disabled={!seasonId}>
                       <SelectTrigger>
                         <SelectValue>
                           {type === 'friendly' ? 'Amistoso' : type === 'league' ? 'Liga' : type === 'cup' ? 'Copa' : <span className="text-gray-400">Selecciona tipo</span>}
@@ -230,7 +251,7 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
                   {/* 4. SELECTOR DE CONDICIÓN */}
                   <div className="space-y-2">
                     <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Condición</Label>
-                    <Select value={isHome} onValueChange={setIsHome} required>
+                    <Select value={isHome} onValueChange={setIsHome} required disabled={!seasonId}>
                       <SelectTrigger>
                         <SelectValue>
                           {isHome === 'true' ? 'Local' : isHome === 'false' ? 'Visitante' : <span className="text-gray-400">Selecciona condición</span>}
@@ -253,6 +274,7 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
                         onChange={(e) => setRound(e.target.value)}
                         placeholder={type === 'league' ? "Ej: Jornada 5" : "Ej: Cuartos de Final"}
                         required 
+                        disabled={!seasonId}
                         className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
                       />
                     </div>
@@ -265,13 +287,14 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                       required 
+                      disabled={!seasonId}
                       className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
                     />
                   </div>
 
                   <div className="space-y-2">
                     <Label className="text-xs font-bold text-gray-400 uppercase ml-1">Campo / Lugar de juego</Label>
-                    <Select value={fieldId} onValueChange={setFieldId}>
+                    <Select value={fieldId} onValueChange={setFieldId} disabled={!seasonId}>
                       <SelectTrigger>
                         <SelectValue>
                           {fieldId 
@@ -297,6 +320,7 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
                         value={location}
                         onChange={(e) => setLocation(e.target.value)}
                         placeholder="Ej: Polideportivo Municipal"
+                        disabled={!seasonId}
                         className="h-12 rounded-2xl bg-gray-50 border-none focus:ring-2 focus:ring-emerald-500" 
                       />
                     </div>

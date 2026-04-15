@@ -1,15 +1,26 @@
 export type Position = 'Portero' | 'Defensa' | 'Medio' | 'Delantero';
-export type Attendance = 'attending' | 'notAttending' | 'noResponse';
+export type Attendance = 'attending' | 'notAttending' | 'noResponse' | 'justified';
 export type MatchStatus = 'scheduled' | 'completed';
 
 export interface Team {
   id: string;
   name: string;
+  ownerId: string;
   shieldUrl?: string;
+}
+
+export interface Injury {
+  id: string;
+  teamId: string;
+  playerId: string;
+  startDate: string;
+  endDate?: string | null;
+  cause?: string | null;
 }
 
 export interface Player {
   id: string;
+  teamId: string;
   firstName: string;
   lastName: string;
   alias?: string;
@@ -19,16 +30,50 @@ export interface Player {
   photoUrl?: string;
   isInjured?: boolean;
   isActive?: boolean;
-  seasonIds?: string[];
+  seasonIds?: string[]; // Deprecated, keeping for migration
+}
+
+export interface PlayerSeason {
+  id: string;
+  teamId: string;
+  playerId: string;
+  seasonId: string;
 }
 
 export interface Season {
   id: string;
+  teamId: string;
   name: string;
+  division?: string;
+}
+
+export interface SeasonFeesInput {
+  ficha: number;
+  inscripcion: number;
+  seguro: number;
+  arbitroPerMatch: number;
+  expectedMatches: number;
+  installments: number;
+  previousBalance: number;
+}
+
+export interface SeasonFees extends SeasonFeesInput {
+  id: string;
+  seasonId: string;
+  teamId: string;
+}
+
+export interface PlayerPayment {
+  id: string;
+  playerId: string;
+  seasonId: string;
+  teamId: string;
+  amountPaid: number;
 }
 
 export interface Opponent {
   id: string;
+  teamId: string;
   name: string;
   shieldUrl?: string;
   seasonIds?: string[];
@@ -36,6 +81,7 @@ export interface Opponent {
 
 export interface Field {
   id: string;
+  teamId: string;
   name: string;
   location?: string; // Google Maps coordinates or address
   mapUrl?: string; // Computed or stored Google Maps URL
@@ -45,6 +91,7 @@ export type MatchType = 'friendly' | 'league' | 'cup';
 
 export interface Match {
   id: string;
+  teamId: string;
   seasonId: string;
   date: string;
   opponentId: string;
@@ -60,6 +107,7 @@ export interface Match {
 
 export interface PlayerStat {
   id: string;
+  teamId: string;
   playerId: string;
   matchId: string;
   seasonId: string;
@@ -79,6 +127,7 @@ export interface LineupSlot {
 
 export interface Lineup {
   id: string;
+  teamId: string;
   name: string;
   formation: string;
   slots: LineupSlot[];

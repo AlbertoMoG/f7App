@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   doc, 
   getDoc, 
+  getDocs,
   collection, 
   query, 
   where, 
@@ -11,7 +12,7 @@ import {
   addDoc
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Player, Match, PlayerStat, Attendance, Opponent, Team } from '../types';
+import { Player, Match, PlayerStat, Attendance, Opponent, Team, Injury, Season } from '../types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
@@ -30,7 +31,7 @@ import {
   TableRow 
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowLeft, Save, Trophy, Users, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Save, Trophy, Users, ShieldAlert, CheckCircle2, Stethoscope } from 'lucide-react';
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -42,10 +43,12 @@ export default function MatchStats() {
   const navigate = useNavigate();
   
   const [match, setMatch] = useState<Match | null>(null);
+  const [season, setSeason] = useState<Season | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [stats, setStats] = useState<PlayerStat[]>([]);
   const [opponent, setOpponent] = useState<Opponent | null>(null);
   const [team, setTeam] = useState<Team | null>(null);
+  const [injuries, setInjuries] = useState<Injury[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [localStats, setLocalStats] = useState<Record<string, Partial<PlayerStat>>>({});
@@ -54,9 +57,10 @@ export default function MatchStats() {
   const visiblePlayers = React.useMemo(() => {
     return players.filter(p => {
       const hasStats = stats.some(s => s.playerId === p.id);
-      return p.isActive !== false || hasStats;
+      const activeInjury = injuries.some(i => i.playerId === p.id && !i.endDate);
+      return (p.isActive !== false && !activeInjury) || hasStats;
     });
-  }, [players, stats]);
+  }, [players, stats, injuries]);
 
   useEffect(() => {
     if (!matchId) return;
@@ -73,17 +77,34 @@ export default function MatchStats() {
         setMatch(matchData);
         setScoreOpponent(matchData.scoreOpponent || 0);
 
+        // Fetch Season
+        const seasonDoc = await getDoc(doc(db, 'seasons', matchData.seasonId));
+        if (seasonDoc.exists()) {
+          setSeason({ id: seasonDoc.id, ...seasonDoc.data() } as Season);
+        }
+
         // Fetch Opponent
         const opponentDoc = await getDoc(doc(db, 'opponents', matchData.opponentId));
         if (opponentDoc.exists()) {
           setOpponent({ id: opponentDoc.id, ...opponentDoc.data() } as Opponent);
         }
 
+        // Fetch PlayerSeasons for this season
+        const psQuery = query(collection(db, 'playerSeasons'), where('seasonId', '==', matchData.seasonId));
+        const psSnapshot = await getDocs(psQuery);
+        const seasonPlayerIds = psSnapshot.docs.map(d => d.data().playerId);
+
         // Fetch Players
-        onSnapshot(collection(db, 'players'), (snapshot) => {
+        const playersQuery = query(collection(db, 'players'), where('teamId', '==', matchData.teamId));
+        onSnapshot(playersQuery, (snapshot) => {
           const playersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Player));
-          // Filter: Show active players OR players who already have stats for this match
-          setPlayers(playersData);
+          
+          // We need to get current stats to know which players have stats
+          getDocs(query(collection(db, 'playerStats'), where('matchId', '==', matchId))).then(statsSnap => {
+            const playersWithStats = statsSnap.docs.map(d => d.data().playerId);
+            // Filter: Show players that are in this season OR players who already have stats for this match
+            setPlayers(playersData.filter(p => seasonPlayerIds.includes(p.id) || playersWithStats.includes(p.id)));
+          });
         });
 
         // Fetch Stats
@@ -99,6 +120,12 @@ export default function MatchStats() {
             initialLocalStats[s.playerId] = { id: doc.id, ...s };
           });
           setLocalStats(prev => ({ ...initialLocalStats, ...prev }));
+        });
+
+        // Fetch Injuries
+        const injuriesQuery = query(collection(db, 'injuries'), where('teamId', '==', matchData.teamId));
+        onSnapshot(injuriesQuery, (snapshot) => {
+          setInjuries(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Injury)));
         });
 
         setLoading(false);
@@ -151,6 +178,7 @@ export default function MatchStats() {
         
         return {
           id: existing?.id || local.id || '',
+          teamId: match.teamId,
           playerId: p.id,
           matchId: matchId,
           seasonId: match.seasonId,
@@ -202,10 +230,13 @@ export default function MatchStats() {
 
   const teamScore = visiblePlayers.reduce((acc, p) => acc + (localStats[p.id]?.goals || 0), 0);
   const attendingCount = visiblePlayers.filter(p => localStats[p.id]?.attendance === 'attending').length;
+  const justifiedCount = visiblePlayers.filter(p => localStats[p.id]?.attendance === 'justified').length;
+  const notAttendingCount = visiblePlayers.filter(p => localStats[p.id]?.attendance === 'notAttending').length;
+  const noResponseCount = visiblePlayers.filter(p => localStats[p.id]?.attendance === 'noResponse').length;
 
   return (
     <div className="min-h-screen bg-[#F5F5F0] pb-20">
-      <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="max-w-screen-2xl mx-auto px-2 py-4">
         <Button 
           variant="ghost" 
           onClick={() => navigate('/matches')}
@@ -220,9 +251,14 @@ export default function MatchStats() {
           <div className="lg:col-span-1 space-y-6">
             <Card className="border-none shadow-2xl rounded-3xl overflow-hidden bg-slate-950">
               <div className="bg-emerald-600 p-6 text-white text-center">
-                <p className="text-emerald-100 text-[10px] font-black uppercase tracking-[0.2em] mb-2">
+                <p className="text-emerald-100 text-[10px] font-black uppercase tracking-[0.2em] mb-1">
                   {match.type === 'league' ? `Liga - ${match.round}` : match.type === 'cup' ? `Copa - ${match.round}` : 'Amistoso'}
                 </p>
+                {season?.division && (
+                  <p className="text-emerald-200 text-[9px] font-bold uppercase tracking-widest mb-2">
+                    {season.division}
+                  </p>
+                )}
                 <h2 className="text-xl font-black mb-1">
                   {format(new Date(match.date), 'dd MMMM yyyy', { locale: es })}
                 </h2>
@@ -335,11 +371,24 @@ export default function MatchStats() {
                       <CardDescription>Registra la asistencia y el desempeño de cada jugador.</CardDescription>
                     </div>
                   </div>
-                  <div className="bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100 flex items-center gap-2">
-                    <CheckCircle2 className="text-emerald-600" size={18} />
-                    <span className="text-emerald-900 font-bold text-sm">
-                      {attendingCount} {attendingCount === 1 ? 'Jugador asiste' : 'Jugadores asisten'}
-                    </span>
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100 flex items-center gap-2">
+                      <CheckCircle2 className="text-emerald-600" size={18} />
+                      <span className="text-emerald-900 font-bold text-sm">
+                        {attendingCount} {attendingCount === 1 ? 'Jugador asiste' : 'Jugadores asisten'}
+                      </span>
+                    </div>
+                    <div className="flex gap-2">
+                      {justifiedCount > 0 && (
+                        <span className="text-[10px] font-bold text-blue-600 uppercase bg-blue-50 px-2 py-1 rounded-md border border-blue-100">{justifiedCount} Justificados</span>
+                      )}
+                      {notAttendingCount > 0 && (
+                        <span className="text-[10px] font-bold text-red-600 uppercase bg-red-50 px-2 py-1 rounded-md border border-red-100">{notAttendingCount} No Asisten</span>
+                      )}
+                      {noResponseCount > 0 && (
+                        <span className="text-[10px] font-bold text-gray-500 uppercase bg-gray-100 px-2 py-1 rounded-md border border-gray-200">{noResponseCount} Sin Respuesta</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </CardHeader>
@@ -370,46 +419,62 @@ export default function MatchStats() {
                                 </span>
                               </TableCell>
                             </TableRow>
-                            {posPlayers.map((player, i) => (
-                              <motion.tr 
-                                key={player.id}
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: i * 0.03 }}
-                                className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
-                              >
-                                <TableCell className="pl-8 py-4">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-black text-xs">
-                                      {player.number}
+                            {posPlayers.map((player, i) => {
+                              const isInjured = injuries.some(inj => inj.playerId === player.id && !inj.endDate);
+                              
+                              return (
+                                <motion.tr 
+                                  key={player.id}
+                                  initial={{ opacity: 0, y: 10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  transition={{ delay: i * 0.03 }}
+                                  className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
+                                >
+                                  <TableCell className="pl-8 py-4">
+                                    <div className="flex items-center gap-3">
+                                      <div className={cn(
+                                        "w-8 h-8 rounded-full flex items-center justify-center font-black text-xs",
+                                        isInjured ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"
+                                      )}>
+                                        {isInjured ? <Stethoscope size={14} /> : player.number}
+                                      </div>
+                                      <div>
+                                        <div className="flex items-center gap-2">
+                                          <p className="font-bold text-sm">
+                                            {player.alias || `${player.firstName} ${player.lastName}`}
+                                          </p>
+                                          {isInjured && (
+                                            <span className="text-[8px] bg-red-500 text-white px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter">Lesionado</span>
+                                          )}
+                                        </div>
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase">{player.position}</p>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <p className="font-bold text-sm">
-                                        {player.alias || `${player.firstName} ${player.lastName}`}
-                                      </p>
-                                      <p className="text-[10px] text-gray-400 font-bold uppercase">{player.position}</p>
-                                    </div>
-                                  </div>
-                                </TableCell>
-                                <TableCell className="py-4">
-                                  <Select 
-                                    value={localStats[player.id]?.attendance || 'noResponse'} 
-                                    onValueChange={(v) => updatePlayerStat(player.id, 'attendance', v)}
-                                  >
-                                    <SelectTrigger className="h-9 w-32 border-none bg-gray-100 rounded-xl text-xs font-bold">
-                                      <SelectValue>
-                                        {localStats[player.id]?.attendance === 'attending' ? 'Asiste' : 
-                                         localStats[player.id]?.attendance === 'notAttending' ? 'No asiste' : 
-                                         'Sin rpta'}
-                                      </SelectValue>
-                                    </SelectTrigger>
-                                    <SelectContent className="rounded-xl border-none shadow-xl">
-                                      <SelectItem value="attending">Asiste</SelectItem>
-                                      <SelectItem value="notAttending">No asiste</SelectItem>
-                                      <SelectItem value="noResponse">Sin rpta</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </TableCell>
+                                  </TableCell>
+                                  <TableCell className="py-4">
+                                    <Select 
+                                      value={localStats[player.id]?.attendance || 'noResponse'} 
+                                      onValueChange={(v) => updatePlayerStat(player.id, 'attendance', v)}
+                                    >
+                                      <SelectTrigger className={cn(
+                                        "h-9 w-32 border-none rounded-xl text-xs font-bold",
+                                        isInjured && localStats[player.id]?.attendance !== 'attending' ? "bg-red-50 text-red-700" : "bg-gray-100"
+                                      )}>
+                                        <SelectValue>
+                                          {localStats[player.id]?.attendance === 'attending' ? 'Asiste' : 
+                                           localStats[player.id]?.attendance === 'notAttending' ? 'No asiste' : 
+                                           localStats[player.id]?.attendance === 'justified' ? 'Justificado' :
+                                           'Sin rpta'}
+                                        </SelectValue>
+                                      </SelectTrigger>
+                                      <SelectContent className="rounded-xl border-none shadow-xl">
+                                        <SelectItem value="attending" disabled={isInjured}>Asiste</SelectItem>
+                                        <SelectItem value="notAttending">No asiste</SelectItem>
+                                        <SelectItem value="justified">Justificado</SelectItem>
+                                        <SelectItem value="noResponse">Sin rpta</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
                                 <TableCell className="py-4 text-center">
                                   <Input 
                                     type="number" 
@@ -452,22 +517,23 @@ export default function MatchStats() {
                                     disabled={localStats[player.id]?.attendance !== 'attending'}
                                   />
                                 </TableCell>
-                                <TableCell className="py-4 text-center pr-8">
-                                  <Input 
-                                    type="number" 
-                                    className={cn(
-                                      "h-9 w-14 mx-auto text-center border-none rounded-xl font-bold transition-all",
-                                      localStats[player.id]?.attendance === 'attending' 
-                                        ? "bg-gray-100 text-gray-900" 
-                                        : "bg-gray-50 text-gray-300 cursor-not-allowed"
-                                    )}
-                                    value={localStats[player.id]?.redCards || 0}
-                                    onChange={(e) => updatePlayerStat(player.id, 'redCards', parseInt(e.target.value) || 0)}
-                                    disabled={localStats[player.id]?.attendance !== 'attending'}
-                                  />
-                                </TableCell>
-                              </motion.tr>
-                            ))}
+                                  <TableCell className="py-4 text-center pr-8">
+                                    <Input 
+                                      type="number" 
+                                      className={cn(
+                                        "h-9 w-14 mx-auto text-center border-none rounded-xl font-bold transition-all",
+                                        localStats[player.id]?.attendance === 'attending' 
+                                          ? "bg-gray-100 text-gray-900" 
+                                          : "bg-gray-50 text-gray-300 cursor-not-allowed"
+                                      )}
+                                      value={localStats[player.id]?.redCards || 0}
+                                      onChange={(e) => updatePlayerStat(player.id, 'redCards', parseInt(e.target.value) || 0)}
+                                      disabled={localStats[player.id]?.attendance !== 'attending'}
+                                    />
+                                  </TableCell>
+                                </motion.tr>
+                              );
+                            })}
                           </React.Fragment>
                         );
                       })}

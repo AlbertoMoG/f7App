@@ -76,6 +76,19 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "formation", "slots", "createdAt"]
+    },
+    "Injury": {
+      "title": "Injury",
+      "description": "A player's injury record",
+      "type": "object",
+      "properties": {
+        "playerId": { "type": "string" },
+        "teamId": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "cause": { "type": "string" }
+      },
+      "required": ["playerId", "teamId", "startDate"]
     }
   },
   "firestore": {
@@ -84,6 +97,7 @@
     "/opponents/{opponentId}": { "schema": "Opponent", "description": "Collection of opposing teams" },
     "/matches/{matchId}": { "schema": "Match", "description": "Collection of matches" },
     "/playerStats/{statId}": { "schema": "PlayerStat", "description": "Collection of player statistics per match" },
-    "/lineups/{lineupId}": { "schema": "Lineup", "description": "Collection of saved lineups" }
+    "/lineups/{lineupId}": { "schema": "Lineup", "description": "Collection of saved lineups" },
+    "/injuries/{injuryId}": { "schema": "Injury", "description": "Collection of player injury history" }
   }
 }

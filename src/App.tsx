@@ -22,7 +22,7 @@ import {
   User
 } from 'firebase/auth';
 import { db, auth } from './firebase';
-import { Player, Season, Opponent, Match, PlayerStat, Lineup, Team, Field } from './types';
+import { Player, Season, Opponent, Match, PlayerStat, Lineup, Team, Field, PlayerSeason, Injury, SeasonFeesInput } from './types';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import PlayerList from './components/PlayerList';
@@ -33,53 +33,32 @@ import TeamSettings from './components/TeamSettings';
 import MatchStats from './pages/MatchStats';
 import AddMatch from './pages/AddMatch';
 import PlayerProfile from './pages/PlayerProfile';
+import Treasury from './pages/Treasury';
+import SeasonForm from './pages/SeasonForm';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Trophy, LogIn } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string;
-    email?: string | null;
-    emailVerified?: boolean;
-    isAnonymous?: boolean;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
+import { handleFirestoreError, OperationType, FirestoreErrorInfo } from './lib/firestoreUtils';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [globalSeasonId, setGlobalSeasonId] = useState<string>('all');
 
   // Data State
   const [team, setTeam] = useState<Team | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [playerSeasons, setPlayerSeasons] = useState<PlayerSeason[]>([]);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [opponents, setOpponents] = useState<Opponent[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [stats, setStats] = useState<PlayerStat[]>([]);
   const [lineups, setLineups] = useState<Lineup[]>([]);
   const [fields, setFields] = useState<Field[]>([]);
+  const [injuries, setInjuries] = useState<Injury[]>([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -92,51 +71,115 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    const unsubTeam = onSnapshot(collection(db, 'team'), (snapshot) => {
+    let unsubPlayers: any;
+    let unsubSeasons: any;
+    let unsubOpponents: any;
+    let unsubMatches: any;
+    let unsubStats: any;
+    let unsubLineups: any;
+    let unsubFields: any;
+    let unsubPlayerSeasons: any;
+    let unsubInjuries: any;
+
+    const unsubTeam = onSnapshot(query(collection(db, 'team'), where('ownerId', '==', user.uid)), async (snapshot) => {
       if (!snapshot.empty) {
-        setTeam({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Team);
+        const currentTeam = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Team;
+        setTeam(currentTeam);
+        
+        // Setup listeners for this team
+        unsubPlayers = onSnapshot(query(collection(db, 'players'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setPlayers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Player)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'players'));
+
+        unsubSeasons = onSnapshot(query(collection(db, 'seasons'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setSeasons(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Season)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'seasons'));
+
+        unsubOpponents = onSnapshot(query(collection(db, 'opponents'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setOpponents(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Opponent)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'opponents'));
+
+        unsubMatches = onSnapshot(query(collection(db, 'matches'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setMatches(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Match)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'matches'));
+
+        unsubStats = onSnapshot(query(collection(db, 'playerStats'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setStats(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlayerStat)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'playerStats'));
+
+        unsubLineups = onSnapshot(query(collection(db, 'lineups'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setLineups(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Lineup)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'lineups'));
+
+        unsubFields = onSnapshot(query(collection(db, 'fields'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setFields(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Field)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'fields'));
+
+        unsubPlayerSeasons = onSnapshot(query(collection(db, 'playerSeasons'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setPlayerSeasons(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlayerSeason)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'playerSeasons'));
+
+        unsubInjuries = onSnapshot(query(collection(db, 'injuries'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setInjuries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Injury)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'injuries'));
+
       } else {
-        setTeam(null);
+        // Create default team and run migration
+        try {
+          const newTeamRef = await addDoc(collection(db, 'team'), { name: 'Mi Equipo Principal', ownerId: user.uid });
+          const newTeamId = newTeamRef.id;
+          
+          // Run migration for all existing data without teamId
+          const batch = writeBatch(db);
+          
+          // Fetch all existing records
+          const collectionsToMigrate = ['players', 'seasons', 'opponents', 'matches', 'playerStats', 'lineups', 'fields'];
+          
+          for (const collName of collectionsToMigrate) {
+            const snap = await getDocs(collection(db, collName));
+            snap.docs.forEach(docSnap => {
+              if (!docSnap.data().teamId) {
+                batch.update(docSnap.ref, { teamId: newTeamId });
+              }
+            });
+          }
+
+          // Migrate seasonIds to playerSeasons
+          const playersSnap = await getDocs(collection(db, 'players'));
+          playersSnap.docs.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data.seasonIds && Array.isArray(data.seasonIds)) {
+              data.seasonIds.forEach((seasonId: string) => {
+                const psRef = doc(collection(db, 'playerSeasons'));
+                batch.set(psRef, {
+                  teamId: newTeamId,
+                  playerId: docSnap.id,
+                  seasonId: seasonId
+                });
+              });
+            }
+          });
+
+          await batch.commit();
+          toast.success('Datos migrados a tu nuevo equipo correctamente');
+        } catch (err) {
+          console.error("Migration error:", err);
+          toast.error("Error al crear el equipo por defecto");
+        }
       }
-    }, (err) => handleFirestoreError(err, 'list', 'team'));
-
-    const unsubPlayers = onSnapshot(collection(db, 'players'), (snapshot) => {
-      setPlayers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Player)));
-    }, (err) => handleFirestoreError(err, 'list', 'players'));
-
-    const unsubSeasons = onSnapshot(collection(db, 'seasons'), (snapshot) => {
-      setSeasons(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Season)));
-    }, (err) => handleFirestoreError(err, 'list', 'seasons'));
-
-    const unsubOpponents = onSnapshot(collection(db, 'opponents'), (snapshot) => {
-      setOpponents(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Opponent)));
-    }, (err) => handleFirestoreError(err, 'list', 'opponents'));
-
-    const unsubMatches = onSnapshot(collection(db, 'matches'), (snapshot) => {
-      setMatches(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Match)));
-    }, (err) => handleFirestoreError(err, 'list', 'matches'));
-
-    const unsubStats = onSnapshot(collection(db, 'playerStats'), (snapshot) => {
-      setStats(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlayerStat)));
-    }, (err) => handleFirestoreError(err, 'list', 'playerStats'));
-
-    const unsubLineups = onSnapshot(collection(db, 'lineups'), (snapshot) => {
-      setLineups(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Lineup)));
-    }, (err) => handleFirestoreError(err, 'list', 'lineups'));
-
-    const unsubFields = onSnapshot(collection(db, 'fields'), (snapshot) => {
-      setFields(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Field)));
-    }, (err) => handleFirestoreError(err, 'list', 'fields'));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'team'));
 
     return () => {
       unsubTeam();
-      unsubPlayers();
-      unsubSeasons();
-      unsubOpponents();
-      unsubMatches();
-      unsubStats();
-      unsubLineups();
-      unsubFields();
+      if (unsubPlayers) unsubPlayers();
+      if (unsubSeasons) unsubSeasons();
+      if (unsubOpponents) unsubOpponents();
+      if (unsubMatches) unsubMatches();
+      if (unsubStats) unsubStats();
+      if (unsubLineups) unsubLineups();
+      if (unsubFields) unsubFields();
+      if (unsubPlayerSeasons) unsubPlayerSeasons();
+      if (unsubInjuries) unsubInjuries();
     };
   }, [user]);
 
@@ -150,33 +193,11 @@ export default function App() {
 
   const handleLogout = () => signOut(auth);
 
-  const handleFirestoreError = (error: any, operation: string, path: string) => {
-    const errInfo: FirestoreErrorInfo = {
-      error: error instanceof Error ? error.message : String(error),
-      authInfo: {
-        userId: auth.currentUser?.uid,
-        email: auth.currentUser?.email,
-        emailVerified: auth.currentUser?.emailVerified,
-        isAnonymous: auth.currentUser?.isAnonymous,
-        tenantId: auth.currentUser?.tenantId,
-        providerInfo: auth.currentUser?.providerData.map(provider => ({
-          providerId: provider.providerId,
-          displayName: provider.displayName,
-          email: provider.email,
-          photoUrl: provider.photoURL
-        })) || []
-      },
-      operationType: operation as OperationType,
-      path
-    };
-    console.error('Firestore Error: ', JSON.stringify(errInfo));
-    throw new Error(JSON.stringify(errInfo));
-  };
-
   // CRUD Handlers
-  const saveTeam = async (t: Omit<Team, 'id'>) => {
+  const saveTeam = async (t: Omit<Team, 'id' | 'ownerId'>) => {
+    if (!user) return;
     try {
-      await addDoc(collection(db, 'team'), t);
+      await addDoc(collection(db, 'team'), { ...t, ownerId: user.uid });
       toast.success('Equipo configurado correctamente');
     } catch (error) {
       toast.error('Error al guardar el equipo');
@@ -194,9 +215,27 @@ export default function App() {
     }
   };
 
-  const addPlayer = async (p: Omit<Player, 'id'>) => {
+  const addPlayer = async (p: Omit<Player, 'id' | 'teamId'> & { seasonIds?: string[] }) => {
+    if (!team) return;
     try {
-      await addDoc(collection(db, 'players'), p);
+      const { seasonIds, ...playerData } = p;
+      const batch = writeBatch(db);
+      
+      const playerRef = doc(collection(db, 'players'));
+      batch.set(playerRef, { ...playerData, teamId: team.id });
+      
+      if (seasonIds && seasonIds.length > 0) {
+        seasonIds.forEach(seasonId => {
+          const psRef = doc(collection(db, 'playerSeasons'));
+          batch.set(psRef, {
+            teamId: team.id,
+            playerId: playerRef.id,
+            seasonId
+          });
+        });
+      }
+      
+      await batch.commit();
       toast.success('Jugador añadido correctamente');
     } catch (error) {
       toast.error('Error al añadir jugador');
@@ -204,9 +243,40 @@ export default function App() {
     }
   };
 
-  const updatePlayer = async (p: Player) => {
+  const updatePlayer = async (p: Player, seasonIds: string[]) => {
+    if (!team) return;
     try {
-      await updateDoc(doc(db, 'players', p.id), { ...p });
+      const batch = writeBatch(db);
+      
+      // 1. Update player data
+      batch.update(doc(db, 'players', p.id), { ...p });
+      
+      // 2. Update player seasons
+      const psQuery = query(collection(db, 'playerSeasons'), where('playerId', '==', p.id));
+      const psSnap = await getDocs(psQuery);
+      
+      const existingSeasonIds = psSnap.docs.map(d => d.data().seasonId);
+      
+      // Remove unselected seasons
+      psSnap.docs.forEach(d => {
+        if (!seasonIds.includes(d.data().seasonId)) {
+          batch.delete(d.ref);
+        }
+      });
+      
+      // Add new selected seasons
+      seasonIds.forEach(seasonId => {
+        if (!existingSeasonIds.includes(seasonId)) {
+          const psRef = doc(collection(db, 'playerSeasons'));
+          batch.set(psRef, {
+            teamId: team.id,
+            playerId: p.id,
+            seasonId
+          });
+        }
+      });
+      
+      await batch.commit();
       toast.success('Jugador actualizado correctamente');
     } catch (error) {
       toast.error('Error al actualizar jugador');
@@ -216,7 +286,15 @@ export default function App() {
 
   const deletePlayer = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'players', id));
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'players', id));
+      
+      // Delete associated playerSeasons
+      const psQuery = query(collection(db, 'playerSeasons'), where('playerId', '==', id));
+      const psSnap = await getDocs(psQuery);
+      psSnap.docs.forEach(d => batch.delete(d.ref));
+
+      await batch.commit();
       toast.success('Jugador eliminado');
     } catch (error) {
       toast.error('Error al eliminar jugador');
@@ -224,19 +302,22 @@ export default function App() {
     }
   };
 
-  const addSeason = async (name: string, playerIds: string[] = [], opponentIds: string[] = []) => {
+  const addSeason = async (name: string, division: string = '', playerIds: string[] = [], opponentIds: string[] = []) => {
+    if (!team) return;
     try {
       const batch = writeBatch(db);
       
       // 1. Crear la temporada
       const seasonRef = doc(collection(db, 'seasons'));
-      batch.set(seasonRef, { name });
+      batch.set(seasonRef, { name, division, teamId: team.id });
       
-      // 2. Asociar jugadores seleccionados
+      // 2. Asociar jugadores seleccionados (PlayerSeason)
       playerIds.forEach(playerId => {
-        const playerRef = doc(db, 'players', playerId);
-        batch.update(playerRef, {
-          seasonIds: arrayUnion(seasonRef.id)
+        const psRef = doc(collection(db, 'playerSeasons'));
+        batch.set(psRef, {
+          teamId: team.id,
+          playerId,
+          seasonId: seasonRef.id
         });
       });
 
@@ -257,27 +338,38 @@ export default function App() {
     }
   };
 
-  const updateSeason = async (id: string, name: string, playerIds: string[], opponentIds: string[]) => {
+  const updateSeason = async (id: string, name: string, division: string, playerIds: string[], opponentIds: string[]) => {
+    if (!team) return;
     try {
       const batch = writeBatch(db);
       
       // 1. Actualizar nombre de la temporada
       const seasonRef = doc(db, 'seasons', id);
-      batch.update(seasonRef, { name });
+      batch.update(seasonRef, { name, division });
       
-      // 2. Actualizar asociación de jugadores
-      const playersWithSeasonQuery = query(collection(db, 'players'), where('seasonIds', 'array-contains', id));
-      const playersWithSeasonSnap = await getDocs(playersWithSeasonQuery);
+      // 2. Actualizar asociación de jugadores (PlayerSeason)
+      const psQuery = query(collection(db, 'playerSeasons'), where('seasonId', '==', id));
+      const psSnap = await getDocs(psQuery);
       
-      playersWithSeasonSnap.docs.forEach(d => {
-        if (!playerIds.includes(d.id)) {
-          batch.update(d.ref, { seasonIds: arrayRemove(id) });
+      const existingPlayerIds = psSnap.docs.map(d => d.data().playerId);
+      
+      // Remove unselected players
+      psSnap.docs.forEach(d => {
+        if (!playerIds.includes(d.data().playerId)) {
+          batch.delete(d.ref);
         }
       });
 
+      // Add new selected players
       playerIds.forEach(playerId => {
-        const playerRef = doc(db, 'players', playerId);
-        batch.update(playerRef, { seasonIds: arrayUnion(id) });
+        if (!existingPlayerIds.includes(playerId)) {
+          const psRef = doc(collection(db, 'playerSeasons'));
+          batch.set(psRef, {
+            teamId: team.id,
+            playerId,
+            seasonId: id
+          });
+        }
       });
 
       // 3. Actualizar asociación de rivales
@@ -308,12 +400,10 @@ export default function App() {
     try {
       const batch = writeBatch(db);
 
-      // 1. Remove season from players
-      const playersQuery = query(collection(db, 'players'), where('seasonIds', 'array-contains', id));
-      const playersSnap = await getDocs(playersQuery);
-      playersSnap.docs.forEach(d => {
-        batch.update(d.ref, { seasonIds: arrayRemove(id) });
-      });
+      // 1. Remove season from playerSeasons
+      const psQuery = query(collection(db, 'playerSeasons'), where('seasonId', '==', id));
+      const psSnap = await getDocs(psQuery);
+      psSnap.docs.forEach(d => batch.delete(d.ref));
 
       // 2. Remove season from opponents
       const opponentsQuery = query(collection(db, 'opponents'), where('seasonIds', 'array-contains', id));
@@ -367,8 +457,10 @@ export default function App() {
   };
 
   const addOpponent = async (name: string, shieldUrl?: string, seasonIds: string[] = []) => {
+    if (!team) return;
     try {
       await addDoc(collection(db, 'opponents'), { 
+        teamId: team.id,
         name, 
         shieldUrl: shieldUrl || null,
         seasonIds: seasonIds.length > 0 ? seasonIds : []
@@ -405,8 +497,9 @@ export default function App() {
   };
 
   const addField = async (name: string, location?: string) => {
+    if (!team) return;
     try {
-      await addDoc(collection(db, 'fields'), { name, location: location || null });
+      await addDoc(collection(db, 'fields'), { teamId: team.id, name, location: location || null });
       toast.success('Campo añadido');
     } catch (error) {
       toast.error('Error al añadir campo');
@@ -434,9 +527,10 @@ export default function App() {
     }
   };
 
-  const addMatch = async (m: Omit<Match, 'id'>) => {
+  const addMatch = async (m: Omit<Match, 'id' | 'teamId'>) => {
+    if (!team) return;
     try {
-      await addDoc(collection(db, 'matches'), m);
+      await addDoc(collection(db, 'matches'), { ...m, teamId: team.id });
       toast.success('Partido programado');
     } catch (error) {
       toast.error('Error al programar partido');
@@ -478,13 +572,14 @@ export default function App() {
   };
 
   const updateStats = async (newStats: PlayerStat[]) => {
+    if (!team) return;
     try {
       for (const stat of newStats) {
         if (stat.id) {
           await updateDoc(doc(db, 'playerStats', stat.id), { ...stat });
         } else {
           const { id, ...rest } = stat;
-          await addDoc(collection(db, 'playerStats'), rest);
+          await addDoc(collection(db, 'playerStats'), { ...rest, teamId: team.id });
         }
       }
       toast.success('Estadísticas actualizadas');
@@ -494,9 +589,44 @@ export default function App() {
     }
   };
 
-  const saveLineup = async (l: Omit<Lineup, 'id'>) => {
+  const updateAttendance = async (playerId: string, matchId: string, attendance: string) => {
+    if (!team) return;
     try {
-      await addDoc(collection(db, 'lineups'), l);
+      const q = query(
+        collection(db, 'playerStats'), 
+        where('teamId', '==', team.id),
+        where('playerId', '==', playerId),
+        where('matchId', '==', matchId)
+      );
+      const snap = await getDocs(q);
+      
+      if (!snap.empty) {
+        await updateDoc(snap.docs[0].ref, { attendance });
+      } else {
+        const match = matches.find(m => m.id === matchId);
+        await addDoc(collection(db, 'playerStats'), {
+          teamId: team.id,
+          playerId,
+          matchId,
+          seasonId: match?.seasonId || globalSeasonId,
+          attendance,
+          goals: 0,
+          assists: 0,
+          yellowCards: 0,
+          redCards: 0
+        });
+      }
+      toast.success('Asistencia actualizada');
+    } catch (error) {
+      toast.error('Error al actualizar asistencia');
+      throw error;
+    }
+  };
+
+  const saveLineup = async (l: Omit<Lineup, 'id' | 'teamId'>) => {
+    if (!team) return;
+    try {
+      await addDoc(collection(db, 'lineups'), { ...l, teamId: team.id });
       toast.success('Alineación guardada');
     } catch (error) {
       toast.error('Error al guardar alineación');
@@ -510,6 +640,27 @@ export default function App() {
       toast.success('Alineación eliminada');
     } catch (error) {
       toast.error('Error al eliminar alineación');
+      throw error;
+    }
+  };
+
+  const addInjury = async (injury: Omit<Injury, 'id' | 'teamId'>) => {
+    if (!team) return;
+    try {
+      await addDoc(collection(db, 'injuries'), { ...injury, teamId: team.id });
+      toast.success('Lesión registrada');
+    } catch (error) {
+      toast.error('Error al registrar lesión');
+      throw error;
+    }
+  };
+
+  const updateInjury = async (injury: Injury) => {
+    try {
+      await updateDoc(doc(db, 'injuries', injury.id), { ...injury });
+      toast.success('Lesión actualizada');
+    } catch (error) {
+      toast.error('Error al actualizar lesión');
       throw error;
     }
   };
@@ -558,26 +709,39 @@ export default function App() {
               user={user} 
               team={team}
               onLogout={handleLogout}
+              seasons={seasons}
+              globalSeasonId={globalSeasonId}
+              setGlobalSeasonId={setGlobalSeasonId}
             >
               {activeTab === 'dashboard' && (
                 <Dashboard 
                   players={players} 
+                  playerSeasons={playerSeasons}
                   matches={matches} 
                   stats={stats} 
                   opponents={opponents} 
                   seasons={seasons}
                   fields={fields}
+                  injuries={injuries}
+                  globalSeasonId={globalSeasonId}
                 />
               )}
               {activeTab === 'players' && (
                 <PlayerList 
                   players={players} 
+                  playerSeasons={playerSeasons}
                   stats={stats}
                   matches={matches}
                   seasons={seasons}
+                  injuries={injuries}
+                  opponents={opponents}
+                  globalSeasonId={globalSeasonId}
                   onAddPlayer={addPlayer} 
                   onUpdatePlayer={updatePlayer} 
-                  onDeletePlayer={deletePlayer} 
+                  onDeletePlayer={deletePlayer}
+                  onAddInjury={addInjury}
+                  onUpdateInjury={updateInjury}
+                  onUpdateAttendance={updateAttendance}
                 />
               )}
               {activeTab === 'matches' && (
@@ -589,6 +753,13 @@ export default function App() {
                   seasons={seasons} 
                   opponents={opponents} 
                   fields={fields}
+                  lineups={lineups}
+                  injuries={injuries}
+                  globalSeasonId={globalSeasonId}
+                  onSetActiveTab={(tab, matchId) => {
+                    setActiveTab(tab);
+                    if (matchId) setSelectedMatchId(matchId);
+                  }}
                   onUpdateMatch={updateMatch} 
                   onDeleteMatch={deleteMatch} 
                   onUpdateStats={updateStats}
@@ -597,18 +768,27 @@ export default function App() {
               {activeTab === 'simulator' && (
                 <LineupSimulator 
                   players={players} 
+                  playerSeasons={playerSeasons}
                   lineups={lineups} 
                   matches={matches}
                   stats={stats}
                   seasons={seasons}
+                  injuries={injuries}
+                  globalSeasonId={globalSeasonId}
+                  initialMatchId={selectedMatchId}
+                  onClearInitialMatchId={() => setSelectedMatchId(null)}
                   onSaveLineup={saveLineup} 
                   onDeleteLineup={deleteLineup} 
                 />
+              )}
+              {activeTab === 'treasury' && (
+                <Treasury teamId={team?.id || ''} />
               )}
               {activeTab === 'settings' && (
                 <SettingsView 
                   seasons={seasons} 
                   players={players}
+                  playerSeasons={playerSeasons}
                   opponents={opponents} 
                   matches={matches}
                   fields={fields}
@@ -652,6 +832,28 @@ export default function App() {
             />
           } />
           <Route path="/players/:playerId" element={<PlayerProfile />} />
+          <Route path="/seasons/new" element={
+            <SeasonForm 
+              teamId={team?.id || ''}
+              seasons={seasons} 
+              players={players} 
+              playerSeasons={playerSeasons}
+              opponents={opponents} 
+              onAddSeason={addSeason} 
+              onUpdateSeason={updateSeason}
+            />
+          } />
+          <Route path="/seasons/:seasonId/edit" element={
+            <SeasonForm 
+              teamId={team?.id || ''}
+              seasons={seasons} 
+              players={players} 
+              playerSeasons={playerSeasons}
+              opponents={opponents} 
+              onAddSeason={addSeason} 
+              onUpdateSeason={updateSeason}
+            />
+          } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>

@@ -1,20 +1,22 @@
 import React, { useState } from 'react';
-import { Settings, ShieldAlert, CalendarRange, MapPin } from 'lucide-react';
+import { Settings, ShieldAlert, CalendarRange, MapPin, DollarSign } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import SeasonManager from './SeasonManager';
 import OpponentManager from './OpponentManager';
 import FieldManager from './FieldManager';
-import { Season, Opponent, Match, Player, Team, Field } from '../types';
+import FeesManager from './FeesManager';
+import { Season, Opponent, Match, Player, Team, Field, PlayerSeason } from '../types';
 
 interface SettingsViewProps {
   seasons: Season[];
   players: Player[];
+  playerSeasons: PlayerSeason[];
   opponents: Opponent[];
   matches: Match[];
   fields: Field[];
   team: Team | null;
-  onAddSeason: (name: string, playerIds?: string[], opponentIds?: string[]) => void;
-  onUpdateSeason: (id: string, name: string, playerIds: string[], opponentIds: string[]) => void;
+  onAddSeason: (name: string, division: string, playerIds?: string[], opponentIds?: string[]) => void;
+  onUpdateSeason: (id: string, name: string, division: string, playerIds: string[], opponentIds: string[]) => void;
   onDeleteSeason: (id: string) => void;
   onAddOpponent: (name: string, shieldUrl?: string, seasonIds?: string[]) => void;
   onUpdateOpponent: (id: string, name: string, shieldUrl?: string, seasonIds?: string[]) => void;
@@ -27,6 +29,7 @@ interface SettingsViewProps {
 export default function SettingsView({
   seasons,
   players,
+  playerSeasons,
   opponents,
   matches,
   fields,
@@ -41,12 +44,13 @@ export default function SettingsView({
   onUpdateField,
   onDeleteField
 }: SettingsViewProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'seasons' | 'opponents' | 'fields'>('seasons');
+  const [activeSubTab, setActiveSubTab] = useState<'seasons' | 'opponents' | 'fields' | 'fees'>('seasons');
 
   const tabs = [
     { id: 'seasons', label: 'Temporadas', icon: CalendarRange },
     { id: 'opponents', label: 'Rivales', icon: ShieldAlert },
     { id: 'fields', label: 'Campos', icon: MapPin },
+    { id: 'fees', label: 'Cuotas', icon: DollarSign },
   ];
 
   return (
@@ -84,6 +88,7 @@ export default function SettingsView({
           <SeasonManager 
             seasons={seasons} 
             players={players}
+            playerSeasons={playerSeasons}
             opponents={opponents}
             onAddSeason={onAddSeason} 
             onUpdateSeason={onUpdateSeason}
@@ -107,6 +112,12 @@ export default function SettingsView({
             onAddField={onAddField}
             onUpdateField={onUpdateField}
             onDeleteField={onDeleteField}
+          />
+        )}
+        {activeSubTab === 'fees' && (
+          <FeesManager 
+            teamId={team?.id || ''}
+            seasons={seasons}
           />
         )}
       </div>

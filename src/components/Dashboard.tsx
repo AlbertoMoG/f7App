@@ -4,6 +4,7 @@ import {
   Users,
   Calendar,
   TrendingUp,
+  TrendingDown,
   Database,
   Target,
   Activity,
@@ -12,7 +13,9 @@ import {
   Shield,
   Loader2,
   Trash2,
-  ExternalLink
+  ExternalLink,
+  Bandage,
+  Check
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -39,25 +42,29 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { motion } from 'motion/react';
-import { Player, Match, PlayerStat, Opponent, Season, Field } from '../types';
+import { Player, Match, PlayerStat, Opponent, Season, Field, PlayerSeason, Injury } from '../types';
 import { cn } from '@/lib/utils';
 import { seedDatabase } from '../lib/seedData';
 import { cleanupDatabase } from '../lib/cleanup';
 import { toast } from 'sonner';
+import { calculatePlayerRating } from '../lib/ratingSystem';
+import { LazyTopPlayersCard } from './LazyTopPlayersCard';
 
 interface DashboardProps {
   players: Player[];
+  playerSeasons: PlayerSeason[];
   matches: Match[];
   stats: PlayerStat[];
   opponents: Opponent[];
   seasons: Season[];
   fields: Field[];
+  injuries: Injury[];
+  globalSeasonId: string;
 }
 
-export default function Dashboard({ players, matches, stats, opponents, seasons, fields }: DashboardProps) {
+export default function Dashboard({ players, playerSeasons, matches, stats, opponents, seasons, fields, injuries, globalSeasonId }: DashboardProps) {
   const [isSeeding, setIsSeeding] = React.useState(false);
   const [isCleaning, setIsCleaning] = React.useState(false);
-  const [selectedSeason, setSelectedSeason] = React.useState<string>('all');
   const [selectedType, setSelectedType] = React.useState<string>('all');
 
   const handleSeed = async () => {
@@ -81,30 +88,63 @@ export default function Dashboard({ players, matches, stats, opponents, seasons,
 
   // 1. Filtrar datos por temporada y tipo
   const filteredMatches = React.useMemo(() => matches.filter(m => {
-    const matchSeason = selectedSeason === 'all' || m.seasonId === selectedSeason;
+    const matchSeason = globalSeasonId === 'all' || m.seasonId === globalSeasonId;
     const matchType = selectedType === 'all' || m.type === selectedType;
     return matchSeason && matchType;
-  }), [matches, selectedSeason, selectedType]);
+  }), [matches, globalSeasonId, selectedType]);
 
   const filteredStats = React.useMemo(() => stats.filter(s => {
     const match = matches.find(m => m.id === s.matchId);
-    const matchSeason = selectedSeason === 'all' || match?.seasonId === selectedSeason;
+    const matchSeason = globalSeasonId === 'all' || match?.seasonId === globalSeasonId;
     const matchType = selectedType === 'all' || match?.type === selectedType;
     return matchSeason && matchType;
-  }), [stats, matches, selectedSeason, selectedType]);
+  }), [stats, matches, globalSeasonId, selectedType]);
 
   const filteredPlayers = React.useMemo(() => {
-    if (selectedSeason === 'all') return players;
-    return players.filter(p => p.seasonIds?.includes(selectedSeason));
-  }, [players, selectedSeason]);
+    if (globalSeasonId === 'all') return players;
+    const seasonPlayerIds = playerSeasons.filter(ps => ps.seasonId === globalSeasonId).map(ps => ps.playerId);
+    return players.filter(p => seasonPlayerIds.includes(p.id));
+  }, [players, playerSeasons, globalSeasonId]);
 
   // 2. Cálculos de estadísticas
-  const { completedMatches, scheduledMatches, matchesWithScores, wins, losses, draws, totalGoals, totalAssists, totalYellowCards, totalRedCards, totalGoalsAgainst } = React.useMemo(() => {
-    const completed = filteredMatches.filter(m => m.status === 'completed');
+  const { completedMatches, scheduledMatches, matchesWithScores, wins, losses, draws, totalGoals, totalAssists, totalYellowCards, totalRedCards, totalGoalsAgainst, winStreak, lossStreak, drawStreak } = React.useMemo(() => {
+    const completed = filteredMatches.filter(m => m.status === 'completed')
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     const scheduled = filteredMatches.filter(m => m.status === 'scheduled')
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     const withScores = completed.filter(m => m.scoreTeam != null && m.scoreOpponent != null);
+
+    // Calculate streaks
+    let currentWinStreak = 0;
+    let maxWinStreak = 0;
+    let currentLossStreak = 0;
+    let maxLossStreak = 0;
+    let currentDrawStreak = 0;
+    let maxDrawStreak = 0;
+
+    withScores.forEach(m => {
+      const isWin = m.scoreTeam! > m.scoreOpponent!;
+      const isLoss = m.scoreTeam! < m.scoreOpponent!;
+      const isDraw = m.scoreTeam! === m.scoreOpponent!;
+
+      if (isWin) {
+        currentWinStreak++;
+        maxWinStreak = Math.max(maxWinStreak, currentWinStreak);
+        currentLossStreak = 0;
+        currentDrawStreak = 0;
+      } else if (isLoss) {
+        currentLossStreak++;
+        maxLossStreak = Math.max(maxLossStreak, currentLossStreak);
+        currentWinStreak = 0;
+        currentDrawStreak = 0;
+      } else if (isDraw) {
+        currentDrawStreak++;
+        maxDrawStreak = Math.max(maxDrawStreak, currentDrawStreak);
+        currentWinStreak = 0;
+        currentLossStreak = 0;
+      }
+    });
 
     return {
       completedMatches: completed,
@@ -117,88 +157,117 @@ export default function Dashboard({ players, matches, stats, opponents, seasons,
       totalAssists: filteredStats.reduce((acc, s) => acc + (s.assists || 0), 0),
       totalYellowCards: filteredStats.reduce((acc, s) => acc + (s.yellowCards || 0), 0),
       totalRedCards: filteredStats.reduce((acc, s) => acc + (s.redCards || 0), 0),
-      totalGoalsAgainst: withScores.reduce((acc, m) => acc + (m.scoreOpponent || 0), 0)
+      totalGoalsAgainst: withScores.reduce((acc, m) => acc + (m.scoreOpponent || 0), 0),
+      winStreak: maxWinStreak,
+      lossStreak: maxLossStreak,
+      drawStreak: maxDrawStreak
     };
   }, [filteredMatches, filteredStats]);
 
   // 3. Top Goleadores (filtrados)
-  const playerGoalsMap = new Map<string, number>();
-  filteredStats.forEach(s => {
-    // Solo incluir jugadores que están inscritos en la temporada actual
-    if (filteredPlayers.some(p => p.id === s.playerId)) {
-      if (s.goals > 0) {
-        playerGoalsMap.set(s.playerId, (playerGoalsMap.get(s.playerId) || 0) + s.goals);
+  const playerGoals = React.useMemo(() => {
+    const playerGoalsMap = new Map<string, number>();
+    filteredStats.forEach(s => {
+      // Solo incluir jugadores que están inscritos en la temporada actual
+      if (filteredPlayers.some(p => p.id === s.playerId)) {
+        if (s.goals > 0) {
+          playerGoalsMap.set(s.playerId, (playerGoalsMap.get(s.playerId) || 0) + s.goals);
+        }
       }
-    }
-  });
+    });
 
-  const playerGoals = Array.from(playerGoalsMap.entries()).map(([playerId, goals]) => {
-    const p = players.find(p => p.id === playerId);
-    return {
-      name: p ? (p.alias || `${p.firstName} ${p.lastName}`) : 'Desconocido',
-      goals
-    };
-  }).sort((a, b) => b.goals - a.goals).slice(0, 5);
+    return Array.from(playerGoalsMap.entries()).map(([playerId, goals]) => {
+      const p = players.find(p => p.id === playerId);
+      return {
+        id: playerId,
+        name: p ? (p.alias || p.firstName) : 'Desconocido',
+        photoUrl: p?.photoUrl,
+        goals
+      };
+    }).sort((a, b) => b.goals - a.goals).slice(0, 8);
+  }, [filteredStats, filteredPlayers, players]);
 
   // 4. Histórico vs Rivales (filtrado)
-  const opponentStats = opponents.map(opp => {
-    const vsOppMatches = completedMatches.filter(m => m.opponentId === opp.id && m.scoreTeam != null && m.scoreOpponent != null);
-    const vsWins = vsOppMatches.filter(m => m.scoreTeam! > m.scoreOpponent!).length;
-    const vsLosses = vsOppMatches.filter(m => m.scoreTeam! < m.scoreOpponent!).length;
-    const vsDraws = vsOppMatches.filter(m => m.scoreTeam! === m.scoreOpponent!).length;
+  const opponentStats = React.useMemo(() => {
+    return opponents.map(opp => {
+      const vsOppMatches = completedMatches.filter(m => m.opponentId === opp.id && m.scoreTeam != null && m.scoreOpponent != null);
+      const vsWins = vsOppMatches.filter(m => m.scoreTeam! > m.scoreOpponent!).length;
+      const vsLosses = vsOppMatches.filter(m => m.scoreTeam! < m.scoreOpponent!).length;
+      const vsDraws = vsOppMatches.filter(m => m.scoreTeam! === m.scoreOpponent!).length;
 
-    return {
-      name: opp.name,
-      wins: vsWins,
-      losses: vsLosses,
-      draws: vsDraws,
-      total: vsOppMatches.length
-    };
-  }).filter(o => o.total > 0).sort((a, b) => b.total - a.total);
+      return {
+        name: opp.name,
+        wins: vsWins,
+        losses: vsLosses,
+        draws: vsDraws,
+        total: vsOppMatches.length
+      };
+    }).filter(o => o.total > 0).sort((a, b) => b.total - a.total);
+  }, [opponents, completedMatches]);
 
-  // 5. Cálculo de IR (Índice de Rendimiento)
-  const teamWinRate = completedMatches.length > 0
-    ? ((wins + draws * 0.5) / completedMatches.length) * 10
-    : 0;
+  // 5. Cálculo de Baremo (Nota Final)
+  const playerBaremo = React.useMemo(() => {
+    return filteredPlayers.map(p => {
+      const rating = calculatePlayerRating(matches, injuries, stats, p, globalSeasonId);
+      return { ...p, rating: parseFloat(rating.notaFinal.toFixed(2)) };
+    }).sort((a, b) => b.rating - a.rating).slice(0, 8);
+  }, [filteredPlayers, matches, injuries, stats, globalSeasonId]);
 
-  const playerIR = filteredPlayers.map(p => {
-    const pStats = filteredStats.filter(s => s.playerId === p.id);
-    const matchesPlayed = pStats.length;
-    if (matchesPlayed === 0) return { ...p, ir: 0, matchesPlayed: 0 };
+  // Memoized calculate functions for LazyTopPlayersCard
+  const calculateBaremo = React.useCallback(() => playerBaremo, [playerBaremo]);
+  const calculateGoals = React.useCallback(() => playerGoals, [playerGoals]);
+  
+  const calculateMaxStreak = React.useCallback(() => {
+    return filteredPlayers
+      .map(p => {
+        const rating = calculatePlayerRating(matches, injuries, stats, p, globalSeasonId);
+        return { ...p, racha: rating.rachaMaxima };
+      })
+      .sort((a, b) => b.racha - a.racha)
+      .slice(0, 8);
+  }, [filteredPlayers, matches, injuries, stats, globalSeasonId]);
 
-    const totalGoals = pStats.reduce((acc, s) => acc + (s.goals || 0), 0);
-    const totalAssists = pStats.reduce((acc, s) => acc + (s.assists || 0), 0);
-    const totalYellow = pStats.reduce((acc, s) => acc + (s.yellowCards || 0), 0);
-    const totalRed = pStats.reduce((acc, s) => acc + (s.redCards || 0), 0);
+  const calculateMatchesPlayed = React.useCallback(() => {
+    return filteredPlayers
+      .map(p => ({
+        ...p,
+        matches: filteredStats.filter(s => s.playerId === p.id && s.attendance === 'attending').length
+      }))
+      .sort((a, b) => b.matches - a.matches)
+      .slice(0, 8);
+  }, [filteredPlayers, filteredStats]);
 
-    // 1. Rendimiento Estadístico (Peso 40%)
-    const statsScore = (totalGoals * 2.0 + totalAssists * 1.0 - totalYellow * 1.0 - totalRed * 3.0);
-    const avgStats = statsScore / matchesPlayed;
-    const normStats = Math.min(Math.max((avgStats + 2) * 2, 0), 10);
+  const calculateLeastMatches = React.useCallback(() => {
+    return filteredPlayers
+      .map(p => ({
+        ...p,
+        matches: filteredStats.filter(s => s.playerId === p.id && s.attendance === 'attending').length
+      }))
+      .sort((a, b) => a.matches - b.matches)
+      .slice(0, 8);
+  }, [filteredPlayers, filteredStats]);
 
-    // 2. Compromiso (Peso 40%)
-    const attending = pStats.filter(s => s.attendance === 'attending').length;
-    const notAttending = pStats.filter(s => s.attendance === 'notAttending').length;
-    const noResponse = pStats.filter(s => s.attendance === 'noResponse').length;
-    const totalInvited = attending + notAttending + noResponse;
-    
-    const attendanceScore = (attending * 1.0 + notAttending * (-0.5) + noResponse * (-1.0));
-    const avgAttendance = totalInvited > 0 ? attendanceScore / totalInvited : 0;
-    const normAttendance = Math.min(Math.max((avgAttendance + 1) * 5, 0), 10);
-
-    // 3. Éxito Colectivo (Peso 20%)
-    const ir = (normStats * 0.4) + (normAttendance * 0.4) + (teamWinRate * 0.2);
-    return { ...p, ir: parseFloat(ir.toFixed(1)), matchesPlayed };
-  }).filter(p => p.matchesPlayed > 0).sort((a, b) => b.ir - a.ir).slice(0, 8);
+  const currentlyInjured = React.useMemo(() => {
+    const today = new Date();
+    return injuries.filter(i => {
+      const start = new Date(i.startDate);
+      const end = i.endDate ? new Date(i.endDate) : null;
+      return start <= today && (!end || end >= today);
+    }).length;
+  }, [injuries]);
 
   const stats_cards = [
     { title: 'Victorias', value: wins, icon: Trophy, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { title: 'Empates', value: draws, icon: Activity, color: 'text-gray-600', bg: 'bg-gray-50' },
     { title: 'Derrotas', value: losses, icon: Target, color: 'text-red-600', bg: 'bg-red-50' },
+    { title: 'Racha Victorias', value: winStreak, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { title: 'Racha Empates', value: drawStreak, icon: Activity, color: 'text-gray-600', bg: 'bg-gray-50' },
+    { title: 'Racha Derrotas', value: lossStreak, icon: TrendingDown, color: 'text-red-600', bg: 'bg-red-50' },
     { title: 'Goles Favor', value: totalGoals, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { title: 'Goles Contra', value: totalGoalsAgainst, icon: TrendingUp, color: 'text-orange-600', bg: 'bg-orange-50' },
+    { title: 'Goles Contra', value: totalGoalsAgainst, icon: TrendingDown, color: 'text-orange-600', bg: 'bg-orange-50' },
     { title: 'Amarillas', value: totalYellowCards, icon: Target, color: 'text-yellow-600', bg: 'bg-yellow-50' },
     { title: 'Rojas', value: totalRedCards, icon: Target, color: 'text-red-700', bg: 'bg-red-100' },
+    { title: 'Lesionados', value: currentlyInjured, icon: Bandage, color: 'text-red-500', bg: 'bg-red-50' },
     { title: 'Jugados', value: completedMatches.length, icon: Calendar, color: 'text-purple-600', bg: 'bg-purple-50' },
     { title: 'Programados', value: scheduledMatches.length, icon: Clock, color: 'text-orange-600', bg: 'bg-orange-50' },
     { title: 'Jugadores', value: filteredPlayers.length, icon: Users, color: 'text-indigo-600', bg: 'bg-indigo-50' },
@@ -211,8 +280,13 @@ export default function Dashboard({ players, matches, stats, opponents, seasons,
     { name: 'Derrotas', value: losses, fill: '#EF4444' },
   ].filter(d => d.value > 0);
 
+  const goalsData = [
+    { name: 'A Favor', value: totalGoals, fill: '#3B82F6' },
+    { name: 'En Contra', value: totalGoalsAgainst, fill: '#F97316' },
+  ].filter(d => d.value > 0);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       <header className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Resumen del Equipo</h2>
@@ -254,36 +328,14 @@ export default function Dashboard({ players, matches, stats, opponents, seasons,
             </Select>
           </div>
 
-          <div className="flex-1 md:w-48">
-            <Label className="text-[10px] uppercase font-bold text-gray-400 ml-1 mb-1 block">Filtrar por Temporada</Label>
-            <Select value={selectedSeason} onValueChange={setSelectedSeason}>
-              <SelectTrigger className="bg-white border-none shadow-sm rounded-xl h-11">
-                {/* TRUCO: Div contenedor y búsqueda manual del nombre de la temporada */}
-                <div className="flex items-center truncate">
-                  <Filter size={16} className="mr-2 text-gray-400 shrink-0" />
-                  <SelectValue>
-                    {selectedSeason === 'all' 
-                      ? 'Histórico (Todas)' 
-                      : seasons.find(s => s.id === selectedSeason)?.name || 'Temporada'}
-                  </SelectValue>
-                </div>
-              </SelectTrigger>
-              <SelectContent className="rounded-xl border-none shadow-xl">
-                <SelectItem value="all">Histórico (Todas)</SelectItem>
-                {seasons.map(s => (
-                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           {players.length === 0 && (
             <Button
               onClick={handleSeed}
               disabled={isSeeding}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl h-11"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl h-11 group"
             >
-              <Database size={18} className="mr-2" />
+              <Database size={18} className="mr-2 group-hover:hidden" />
+              <Check size={18} className="mr-2 hidden group-hover:block" />
               {isSeeding ? 'Generando...' : 'Datos de Prueba'}
             </Button>
           )}
@@ -291,7 +343,7 @@ export default function Dashboard({ players, matches, stats, opponents, seasons,
       </header>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-11 gap-2 md:gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2 md:gap-3">
         {stats_cards.map((card, i) => (
           <motion.div
             key={card.title}
@@ -299,14 +351,16 @@ export default function Dashboard({ players, matches, stats, opponents, seasons,
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.05 }}
           >
-            <Card className="border-none shadow-sm hover:shadow-md transition-shadow h-full">
-              <CardContent className="p-2 flex flex-col items-center justify-center gap-1">
-                <div className={cn("p-1.5 rounded-lg", card.bg)}>
-                  <card.icon className={card.color} size={14} />
+            <Card className="border border-gray-100 shadow-sm hover:shadow-md hover:border-emerald-200 hover:bg-emerald-50/30 transition-all h-full cursor-default group">
+              <CardContent className="p-3 flex items-center justify-between gap-2 h-full">
+                <div className="flex flex-col items-start gap-1.5">
+                  <div className={cn("p-1.5 rounded-lg transition-colors", card.bg, "group-hover:bg-white")}>
+                    <card.icon className={card.color} size={16} />
+                  </div>
+                  <p className="text-[10px] font-bold text-gray-500 uppercase leading-tight">{card.title}</p>
                 </div>
-                <div className="text-center">
-                  <p className="text-[8px] font-bold text-gray-400 uppercase truncate">{card.title}</p>
-                  <h3 className="text-lg font-black text-gray-900">{card.value}</h3>
+                <div className="text-right">
+                  <h3 className={cn("text-2xl font-black", card.color)}>{card.value}</h3>
                 </div>
               </CardContent>
             </Card>
@@ -314,9 +368,9 @@ export default function Dashboard({ players, matches, stats, opponents, seasons,
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Win Rate Pie Chart */}
-        <Card className="border-none shadow-sm lg:col-span-1">
+        <Card className="border border-gray-100 shadow-sm">
           <CardHeader>
             <CardTitle>Distribución de Resultados</CardTitle>
             <CardDescription>Porcentaje de éxito en partidos jugados.</CardDescription>
@@ -351,142 +405,199 @@ export default function Dashboard({ players, matches, stats, opponents, seasons,
           </CardContent>
         </Card>
 
-        {/* Goals Chart */}
-        <Card className="border-none shadow-sm lg:col-span-2">
+        {/* Goals Donut Chart */}
+        <Card className="border border-gray-100 shadow-sm">
           <CardHeader>
-            <CardTitle>Máximos Goleadores</CardTitle>
-            <CardDescription>Top 5 jugadores en la temporada seleccionada.</CardDescription>
+            <CardTitle>Balance de Goles</CardTitle>
+            <CardDescription>Goles a favor vs. en contra.</CardDescription>
           </CardHeader>
-          <CardContent className="h-[250px]">
-            {playerGoals.length > 0 ? (
+          <CardContent className="h-[250px] flex items-center justify-center">
+            {goalsData.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={playerGoals} layout="vertical" margin={{ left: 40 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E5E7EB" />
-                  <XAxis type="number" hide />
-                  <YAxis
-                    dataKey="name"
-                    type="category"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 12, fill: '#6B7280' }}
-                  />
+                <PieChart>
+                  <Pie
+                    data={goalsData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={70}
+                    paddingAngle={5}
+                    dataKey="value"
+                    label={({ name, value }) => `${name}: ${value}`}
+                    labelLine={false}
+                  >
+                    {goalsData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.fill} />
+                    ))}
+                  </Pie>
                   <Tooltip
-                    cursor={{ fill: 'transparent' }}
                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                   />
-                  <Bar dataKey="goals" radius={[0, 4, 4, 0]} barSize={20}>
-                    {playerGoals.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={['#10B981', '#3B82F6', '#F59E0B', '#8B5CF6', '#EC4899'][index % 5]} />
-                    ))}
-                    <LabelList dataKey="goals" position="right" fill="#6B7280" fontSize={12} />
-                  </Bar>
-                </BarChart>
+                </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-gray-400 italic text-sm">
-                No hay goles registrados en esta temporada.
-              </div>
+              <div className="text-gray-400 italic text-sm">No hay goles registrados.</div>
             )}
           </CardContent>
         </Card>
       </div>
 
       {/* Top Players Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-8">
         {/* Top Players by IR */}
-        <Card className="border-none shadow-sm">
-          <CardHeader>
-            <CardTitle>Top 8 Jugadores por IR</CardTitle>
-            <CardDescription>Índice de Rendimiento (Compromiso + Estadísticas).</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {playerIR.slice(0, 8).map((player, i) => (
-                <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center font-bold text-emerald-700 text-xs overflow-hidden">
-                      {player.photoUrl ? (
-                        <img src={player.photoUrl} alt={player.alias} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                      ) : (
-                        i + 1
-                      )}
-                    </div>
-                    <p className="font-bold text-gray-900">{player.alias || `${player.firstName} ${player.lastName}`}</p>
-                  </div>
-                  <div className="text-lg font-black text-emerald-600">{player.ir}</div>
+        <LazyTopPlayersCard
+          title="Top 8 Jugadores por Baremo"
+          description="Nota final basada en Compromiso y Desempeño."
+          calculate={calculateBaremo}
+          renderItem={(player: any, i: number) => (
+            <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors rounded-xl">
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0",
+                  i === 0 ? "bg-yellow-100 text-yellow-700" :
+                  i === 1 ? "bg-gray-200 text-gray-700" :
+                  i === 2 ? "bg-amber-100 text-amber-700" :
+                  "bg-white text-gray-400 border border-gray-200"
+                )}>
+                  {i + 1}
                 </div>
-              ))}
+                <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center font-bold text-emerald-700 text-xs overflow-hidden shrink-0">
+                  {player.photoUrl ? (
+                    <img src={player.photoUrl} alt={player.alias} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    (player.alias || player.firstName).charAt(0).toUpperCase()
+                  )}
+                </div>
+                <p className="font-bold text-gray-900 truncate">{player.alias || player.firstName}</p>
+              </div>
+              <div className="text-lg font-black text-emerald-600">{player.rating}</div>
             </div>
-          </CardContent>
-        </Card>
+          )}
+        />
+
+        {/* Top Goalscorers */}
+        <LazyTopPlayersCard
+          title="Máximos Goleadores"
+          description="Top 8 jugadores con más goles."
+          calculate={calculateGoals}
+          renderItem={(player: any, i: number) => (
+            <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors rounded-xl">
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0",
+                  i === 0 ? "bg-yellow-100 text-yellow-700" :
+                  i === 1 ? "bg-gray-200 text-gray-700" :
+                  i === 2 ? "bg-amber-100 text-amber-700" :
+                  "bg-white text-gray-400 border border-gray-200"
+                )}>
+                  {i + 1}
+                </div>
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-xs overflow-hidden shrink-0">
+                  {player.photoUrl ? (
+                    <img src={player.photoUrl} alt={player.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    player.name.charAt(0).toUpperCase()
+                  )}
+                </div>
+                <p className="font-bold text-gray-900 truncate">{player.name}</p>
+              </div>
+              <div className="text-lg font-black text-blue-600">{player.goals}</div>
+            </div>
+          )}
+        />
+
+        {/* Top Players by Max Streak */}
+        <LazyTopPlayersCard
+          title="Top 8 Racha Máxima"
+          description="Mayor número de partidos consecutivos asistidos."
+          calculate={calculateMaxStreak}
+          renderItem={(player: any, i: number) => (
+            <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors rounded-xl">
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0",
+                  i === 0 ? "bg-yellow-100 text-yellow-700" :
+                  i === 1 ? "bg-gray-200 text-gray-700" :
+                  i === 2 ? "bg-amber-100 text-amber-700" :
+                  "bg-white text-gray-400 border border-gray-200"
+                )}>
+                  {i + 1}
+                </div>
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-xs overflow-hidden shrink-0">
+                  {player.photoUrl ? (
+                    <img src={player.photoUrl} alt={player.alias} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    (player.alias || player.firstName).charAt(0).toUpperCase()
+                  )}
+                </div>
+                <p className="font-bold text-gray-900 truncate">{player.alias || player.firstName}</p>
+              </div>
+              <div className="text-lg font-black text-blue-600">{player.racha}</div>
+            </div>
+          )}
+        />
 
         {/* Top Players by Matches Played */}
-        <Card className="border-none shadow-sm">
-          <CardHeader>
-            <CardTitle>Top 8 Partidos Jugados</CardTitle>
-            <CardDescription>Jugadores con más partidos disputados.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {filteredPlayers
-                .map(p => ({
-                  ...p,
-                  matches: filteredStats.filter(s => s.playerId === p.id && s.attendance === 'attending').length
-                }))
-                .sort((a, b) => b.matches - a.matches)
-                .slice(0, 8)
-                .map((player, i) => (
-                  <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center font-bold text-purple-700 text-xs overflow-hidden">
-                        {player.photoUrl ? (
-                          <img src={player.photoUrl} alt={player.alias} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        ) : (
-                          i + 1
-                        )}
-                      </div>
-                      <p className="font-bold text-gray-900">{player.alias || `${player.firstName} ${player.lastName}`}</p>
-                    </div>
-                    <div className="text-lg font-black text-purple-600">{player.matches}</div>
-                  </div>
-                ))}
+        <LazyTopPlayersCard
+          title="Top 8 Partidos Jugados"
+          description="Jugadores con más partidos disputados."
+          calculate={calculateMatchesPlayed}
+          renderItem={(player: any, i: number) => (
+            <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors rounded-xl">
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0",
+                  i === 0 ? "bg-yellow-100 text-yellow-700" :
+                  i === 1 ? "bg-gray-200 text-gray-700" :
+                  i === 2 ? "bg-amber-100 text-amber-700" :
+                  "bg-white text-gray-400 border border-gray-200"
+                )}>
+                  {i + 1}
+                </div>
+                <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center font-bold text-purple-700 text-xs overflow-hidden shrink-0">
+                  {player.photoUrl ? (
+                    <img src={player.photoUrl} alt={player.alias} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    (player.alias || player.firstName).charAt(0).toUpperCase()
+                  )}
+                </div>
+                <p className="font-bold text-gray-900 truncate">{player.alias || player.firstName}</p>
+              </div>
+              <div className="text-lg font-black text-purple-600">{player.matches}</div>
             </div>
-          </CardContent>
-        </Card>
+          )}
+        />
 
         {/* Top Players by Least Matches */}
-        <Card className="border-none shadow-sm">
-          <CardHeader>
-            <CardTitle>Top 8 Menos Partidos</CardTitle>
-            <CardDescription>Jugadores con menos partidos disputados.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {filteredPlayers
-                .map(p => ({
-                  ...p,
-                  matches: filteredStats.filter(s => s.playerId === p.id && s.attendance === 'attending').length
-                }))
-                .sort((a, b) => a.matches - b.matches)
-                .slice(0, 8)
-                .map((player, i) => (
-                  <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center font-bold text-orange-700 text-xs overflow-hidden">
-                        {player.photoUrl ? (
-                          <img src={player.photoUrl} alt={player.alias} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        ) : (
-                          i + 1
-                        )}
-                      </div>
-                      <p className="font-bold text-gray-900">{player.alias || `${player.firstName} ${player.lastName}`}</p>
-                    </div>
-                    <div className="text-lg font-black text-orange-600">{player.matches}</div>
-                  </div>
-                ))}
+        <LazyTopPlayersCard
+          title="Top 8 Menos Partidos"
+          description="Jugadores con menos partidos disputados."
+          calculate={calculateLeastMatches}
+          renderItem={(player: any, i: number) => (
+            <div key={player.id} className="flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors rounded-xl">
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0",
+                  i === 0 ? "bg-yellow-100 text-yellow-700" :
+                  i === 1 ? "bg-gray-200 text-gray-700" :
+                  i === 2 ? "bg-amber-100 text-amber-700" :
+                  "bg-white text-gray-400 border border-gray-200"
+                )}>
+                  {i + 1}
+                </div>
+                <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center font-bold text-orange-700 text-xs overflow-hidden shrink-0">
+                  {player.photoUrl ? (
+                    <img src={player.photoUrl} alt={player.alias} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    (player.alias || player.firstName).charAt(0).toUpperCase()
+                  )}
+                </div>
+                <p className="font-bold text-gray-900 truncate">{player.alias || player.firstName}</p>
+              </div>
+              <div className="text-lg font-black text-orange-600">{player.matches}</div>
             </div>
-          </CardContent>
-        </Card>
+          )}
+        />
       </div>
 
       {/* Upcoming Matches */}
@@ -520,6 +631,7 @@ export default function Dashboard({ players, matches, stats, opponents, seasons,
                         <p className="font-black text-lg text-gray-900 truncate">{opponent?.name || 'Rival desconocido'}</p>
                         <p className="text-xs font-bold text-emerald-600 uppercase mt-1">
                           {season?.name || 'Sin temporada'}
+                          {season?.division && <span className="text-gray-400 ml-1">• {season.division}</span>}
                         </p>
                       </div>
                     </div>

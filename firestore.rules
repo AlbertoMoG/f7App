@@ -70,12 +70,31 @@ service cloud.firestore {
              request.resource.data.attendance in ['attending', 'notAttending', 'noResponse'];
     }
 
+    function isValidInjury() {
+      return hasRequiredFields(['playerId', 'teamId', 'startDate']) &&
+             isValidString('playerId', 1, 100) &&
+             isValidString('teamId', 1, 100) &&
+             isValidString('startDate', 1, 100);
+    }
+
     // ===============================================================
     // Match Rules
     // ===============================================================
     match /players/{playerId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated() && isValidPlayer();
+      allow delete: if isAuthenticated();
+    }
+
+    match /playerSeasons/{psId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    match /injuries/{injuryId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidInjury();
       allow delete: if isAuthenticated();
     }
 

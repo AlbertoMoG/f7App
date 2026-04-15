@@ -45,7 +45,7 @@ SelectTrigger.displayName = "SelectTrigger"
 
 const SelectContent = React.forwardRef<
   HTMLDivElement,
-  SelectPrimitive.Popup.Props
+  SelectPrimitive.Popup.Props & { side?: any; sideOffset?: any }
 >(({ className, children, side = "bottom", sideOffset = 4, ...props }, ref) => (
   <SelectPrimitive.Portal>
     <SelectPrimitive.Positioner side={side} sideOffset={sideOffset} className="z-50">
