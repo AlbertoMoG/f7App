@@ -29,8 +29,8 @@ interface SeasonManagerProps {
   players: Player[];
   playerSeasons: PlayerSeason[];
   opponents: Opponent[];
-  onAddSeason: (name: string, division: string, playerIds: string[], opponentIds: string[]) => void;
-  onUpdateSeason: (id: string, name: string, division: string, playerIds: string[], opponentIds: string[]) => void;
+  onAddSeason: (name: string, division: string, startYear: number, playerIds: string[], opponentIds: string[]) => void;
+  onUpdateSeason: (id: string, name: string, division: string, startYear: number, playerIds: string[], opponentIds: string[]) => void;
   onDeleteSeason: (id: string) => void;
 }
 
@@ -84,7 +84,12 @@ export default function SeasonManager({
                       </div>
                       <div>
                         <div className="flex flex-col">
-                          <span className="font-bold text-gray-800 block text-lg leading-tight">{s.name}</span>
+                          <span className="font-bold text-gray-800 block text-lg leading-tight">
+                            {s.name}
+                            <span className="text-gray-400 font-medium ml-2 text-sm">
+                              ({s.startYear}-{s.startYear + 1})
+                            </span>
+                          </span>
                           {s.division && (
                             <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mt-0.5">
                               {s.division}

@@ -1,0 +1,352 @@
+      <Card className="border-none shadow-sm rounded-2xl">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Clock className="text-emerald-600" size={20} />
+            Próximos Partidos
+          </CardTitle>
+          <CardDescription>Partidos programados próximamente.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {scheduledMatches.length === 0 ? (
+              <p className="col-span-full text-center py-8 text-gray-400 italic text-sm">No hay partidos programados.</p>
+            ) : (
+              scheduledMatches.slice(0, 6).map(match => {
+                const opponent = opponents.find(o => o.id === match.opponentId);
+                const season = seasons.find(s => s.id === match.seasonId);
+                const pred = predictions.get(match.id);
+                
+                return (
+                  <div key={match.id} className="flex flex-col p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-all relative group/card">
+                    <div className="absolute -top-2 -right-2 z-10 flex flex-col items-end gap-1">
+                      {pred && (
+                        <div className="bg-emerald-600 text-white text-[9px] font-black px-2 py-1 rounded-lg shadow-lg uppercase tracking-wider flex items-center gap-1 border border-emerald-500">
+                          <Database size={10} /> Predicción IA
+                        </div>
+                      )}
+                      <div className={cn(
+                        "text-[9px] font-black px-2 py-1 rounded-lg shadow-md uppercase tracking-wider flex items-center gap-1 border",
+                        match.isHome ? "bg-blue-600 text-white border-blue-500" : "bg-orange-500 text-white border-orange-400"
+                      )}>
+                        {match.isHome ? <Home size={10} /> : <Navigation size={10} />}
+                        {match.isHome ? 'Local' : 'Visitante'}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-16 h-16 bg-gray-50 rounded-xl shadow-inner flex items-center justify-center overflow-hidden border border-gray-100 shrink-0">
+                        {opponent?.shieldUrl ? (
+                          <img src={opponent.shieldUrl} alt={opponent.name} className="w-full h-full object-contain p-2" referrerPolicy="no-referrer" />
+                        ) : (
+                          <Shield size={32} className="text-gray-300" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-black text-base text-gray-900 truncate leading-tight">{opponent?.name || 'Rival desconocido'}</p>
+                        <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1 truncate">
+                          {season?.name || 'Sin temporada'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-gray-50 p-2 rounded-xl border border-gray-100/50">
+                          <div className="flex items-center gap-1.5 text-gray-400 mb-1">
+                            <Calendar size={12} />
+                            <span className="text-[9px] font-bold uppercase">Cuándo</span>
+                          </div>
+                          <p className="text-[11px] font-bold text-gray-700">{format(new Date(match.date), "d 'de' MMM", { locale: es })}</p>
+                          <p className="text-[10px] text-gray-500">{format(new Date(match.date), "HH:mm")}</p>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded-xl border border-gray-100/50">
+                          <div className="flex items-center gap-1.5 text-gray-400 mb-1">
+                            <Target size={12} />
+                            <span className="text-[9px] font-bold uppercase">Dónde</span>
+                          </div>
+                          <div className="truncate">
+                            {match.fieldId ? (
+                              (() => {
+                                const field = fields.find(f => f.id === match.fieldId);
+                                return field?.name ? (
+                                  <span className="text-[11px] font-bold text-gray-700 truncate block">{field.name}</span>
+                                ) : (
+                                  <span className="text-[11px] text-gray-400">Sin campo</span>
+                                );
+                              })()
+                            ) : (
+                              <span className="text-[11px] font-bold text-gray-700 truncate block">{match.location || 'Por definir'}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {pred && (
+                        <>
+                          <div className={cn(
+                            "p-3 rounded-2xl border transition-all space-y-3",
+                            pred.team > pred.opponent ? "bg-emerald-50/40 border-emerald-100/50" :
+                            pred.team < pred.opponent ? "bg-red-50/40 border-red-100/50" :
+                            "bg-gray-50/40 border-gray-200/50"
+                          )}>
+                            <div className="flex items-center justify-between">
+                              <div className="flex flex-col">
+                                <span className={cn(
+                                  "text-[9px] font-black uppercase tracking-wider mb-0.5",
+                                  pred.team > pred.opponent ? "text-emerald-700" :
+                                  pred.team < pred.opponent ? "text-red-700" :
+                                  "text-gray-600"
+                                )}>
+                                  Resultado Probable
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className={cn(
+                                    "text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm",
+                                    pred.confidence === 'Alta' ? "bg-emerald-600 text-white" :
+                                    pred.confidence === 'Media' ? "bg-blue-500 text-white" :
+                                    "bg-gray-400 text-white"
+                                  )}>
+                                    {pred.confidence}
+                                  </span>
+                                  <div className="flex items-center gap-1.5 bg-white/80 px-2.5 py-1 rounded-full border border-black/5 shadow-sm">
+                                    <span className={cn(
+                                      "text-sm font-black",
+                                      pred.team > pred.opponent ? "text-emerald-600" :
+                                      pred.team < pred.opponent ? "text-red-600" :
+                                      "text-gray-700"
+                                    )}>{pred.team}</span>
+                                    <span className="text-gray-300 font-bold">-</span>
+                                    <span className={cn(
+                                      "text-sm font-black",
+                                      pred.team < pred.opponent ? "text-red-600" : "text-gray-400"
+                                    )}>{pred.opponent}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-[9px] font-black text-gray-400 uppercase block mb-1">Victoria Escala</span>
+                                <div className="flex items-center gap-1">
+                                  <Trophy size={12} className={cn(pred.probabilities.win > 50 ? "text-emerald-500 animate-bounce" : "text-gray-300")} />
+                                  <span className="text-xl font-black text-gray-900 leading-none">{pred.probabilities.win}%</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Barra de Probabilidades */}
+                            <div className="space-y-1.5">
+                              <div className="w-full h-2.5 bg-gray-200 rounded-full overflow-hidden flex shadow-inner border border-white">
+                                <div 
+                                  className="h-full bg-emerald-500 transition-all duration-1000 relative group/prob" 
+                                  style={{ width: `${pred.probabilities.win}%` }}
+                                >
+                                  {pred.probabilities.win > 15 && <span className="absolute inset-0 flex items-center justify-center text-[7px] font-black text-white truncate px-1">V</span>}
+                                </div>
+                                <div 
+                                  className="h-full bg-gray-400 transition-all duration-1000 relative" 
+                                  style={{ width: `${pred.probabilities.draw}%` }}
+                                >
+                                  {pred.probabilities.draw > 15 && <span className="absolute inset-0 flex items-center justify-center text-[7px] font-black text-white truncate px-1">E</span>}
+                                </div>
+                                <div 
+                                  className="h-full bg-red-500 transition-all duration-1000 relative" 
+                                  style={{ width: `${pred.probabilities.loss}%` }}
+                                >
+                                  {pred.probabilities.loss > 15 && <span className="absolute inset-0 flex items-center justify-center text-[7px] font-black text-white truncate px-1">D</span>}
+                                </div>
+                              </div>
+                              <div className="flex justify-between text-[8px] font-black text-gray-400 uppercase tracking-tighter">
+                                <span className="text-emerald-600">Victoria {pred.probabilities.win}%</span>
+                                <span className="text-gray-500">Empate {pred.probabilities.draw}%</span>
+                                <span className="text-red-500">Derrota {pred.probabilities.loss}%</span>
+                              </div>
+                            </div>
+
+                            <Button 
+                              variant="ghost" 
+                              className="w-full mt-2 h-9 rounded-xl bg-white/50 hover:bg-white border border-black/5 flex items-center justify-between px-3 group/btn"
+                              onClick={() => setRecommendedMatchId(match.id)}
+                            >
+                              <div className="flex items-center gap-2">
+                                <Sparkles size={14} className="text-amber-500 group-hover/btn:rotate-12 transition-transform" />
+                                <span className="text-[11px] font-bold text-gray-700">Mejor Equipo Posible</span>
+                              </div>
+                              <ChevronRight size={14} className="text-gray-400 group-hover/btn:translate-x-0.5 transition-transform" />
+                            </Button>
+                          </div>
+
+                          {/* Razonamiento detallado */}
+                          <div className="bg-gray-50/50 p-3 rounded-2xl border border-gray-100 space-y-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Lightbulb size={12} className="text-amber-500" />
+                              <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">Puntos Clave del Análisis</span>
+                            </div>
+                            <ul className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                              {pred.reasons.map((reason, idx) => {
+                                let Icon = "🔹";
+                                const lowerReason = reason.toLowerCase();
+                                if (lowerReason.includes('aprendizaje') || lowerReason.includes('calibración')) Icon = "🎓";
+                                else if (lowerReason.includes('racha')) Icon = "🔥";
+                                else if (lowerReason.includes('química') || lowerReason.includes('dúo')) Icon = "🤝";
+                                else if (lowerReason.includes('fatiga') || lowerReason.includes('calendario') || lowerReason.includes('descansado')) Icon = "⏱️";
+                                else if (lowerReason.includes('edad') || lowerReason.includes('joven') || lowerReason.includes('veteranía')) Icon = "🧠";
+                                else if (lowerReason.includes('portero') || lowerReason.includes('defensiva') || lowerReason.includes('defensa') || lowerReason.includes('encajar')) Icon = "🛡️";
+                                else if (lowerReason.includes('delanteros') || lowerReason.includes('ofensiva') || lowerReason.includes('goleadora')) Icon = "⚔️";
+                                else if (lowerReason.includes('clasificación') || lowerReason.includes('tabla')) Icon = "📊";
+                                else if (lowerReason.includes('baja') && !lowerReason.includes('Media') && !lowerReason.includes('Alta')) Icon = "🏥";
+
+                                return (
+                                  <li key={idx} className="flex items-start gap-1.5 text-[10px] leading-tight text-gray-600">
+                                    <span className="shrink-0 text-[10px] mt-px">{Icon}</span>
+                                    <span className="font-medium">{reason}</span>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Modal de Equipo Recomendado */}
+      <Dialog open={!!recommendedMatchId} onOpenChange={(open) => !open && setRecommendedMatchId(null)}>
+        <DialogContent className="sm:max-w-[450px] rounded-3xl p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-gradient-to-br from-indigo-600 via-emerald-600 to-teal-600 p-6 text-white relative">
+            <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+              <Brain size={120} />
+            </div>
+            <DialogHeader className="relative z-10 text-left">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="bg-white/20 p-2 rounded-xl backdrop-blur-sm">
+                  <Sparkles size={20} className="text-amber-300" />
+                </div>
+                <DialogTitle className="text-2xl font-black italic tracking-tight flex items-center gap-2">
+                  AI Scouting Report
+                  <Badge className="bg-emerald-400/30 text-[9px] text-white border-white/20 animate-pulse">ML LEARNING</Badge>
+                </DialogTitle>
+              </div>
+              <DialogDescription className="text-emerald-50 text-sm font-medium">
+                Selección de 10 jugadores con equilibrio táctico (Dibujo 2-3-1 + suplentes) optimizada para la victoria.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          
+          <div className="p-6 bg-gray-50 max-h-[70vh] overflow-y-auto">
+            {recommendedMatchId && (() => {
+              const match = matches.find(m => m.id === recommendedMatchId);
+              const pred = predictions.get(recommendedMatchId);
+              if (!match || !pred) return null;
+              
+              const opponent = opponents.find(o => o.id === match.opponentId);
+
+              return (
+                <div className="space-y-4 text-left">
+                  <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-gray-100 shadow-sm">
+                    <div className="bg-gray-50 w-10 h-10 rounded-xl flex items-center justify-center font-bold text-gray-400 shrink-0 uppercase text-[10px]">
+                      vs
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-gray-900 leading-tight">{opponent?.name || 'Rival'}</p>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Sugerencia AI p/ Temporada</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl flex items-center justify-between shadow-sm overflow-hidden relative group/ideal">
+                    <div className="absolute top-0 right-0 p-2 opacity-5 pointer-events-none group-hover/ideal:scale-110 transition-transform">
+                      <Trophy size={48} />
+                    </div>
+                    <div className="flex flex-col relative z-10">
+                      <span className="text-[10px] font-black uppercase text-emerald-800 tracking-wider">Victoria Probable Ideal</span>
+                      <span className="text-[9px] text-emerald-600 font-medium italic">Con el equipo aquí propuesto</span>
+                    </div>
+                    <div className="flex items-center gap-2 relative z-10">
+                       <Trophy size={16} className="text-emerald-500 animate-bounce" />
+                       <span className="text-2xl font-black text-emerald-700">{pred.recommendedProbabilities.win}%</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {pred.recommendedSquad.map((player, idx) => (
+                      <motion.div 
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: idx * 0.05 }}
+                        key={player.id} 
+                        className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-emerald-200 transition-colors group/p"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] font-black text-gray-300 w-4">{idx + 1}</span>
+                          <Avatar className="h-8 w-8 rounded-lg shrink-0 border border-gray-50">
+                            <AvatarImage src={player.photoUrl} className="object-cover" referrerPolicy="no-referrer" />
+                            <AvatarFallback className="bg-emerald-50 text-emerald-700 text-[10px] font-bold">
+                              {player.firstName[0]}{player.lastName[0]}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="text-xs font-bold text-gray-900 leading-tight group-hover/p:text-emerald-600 transition-colors">
+                              {player.alias || player.firstName}
+                            </p>
+                            <div className="flex items-center gap-1 mt-1">
+                              <Badge variant="outline" className="text-[8px] h-4 px-1 bg-gray-50 border-gray-100 text-gray-400 font-medium">
+                                {player.position}
+                              </Badge>
+                              {(() => {
+                                 const pRating = allPlayerRatings.find(r => r.id === player.id);
+                                 const goals = stats.filter(s => s.playerId === player.id && s.attendance === 'attending').reduce((acc, s) => acc + (s.goals || 0), 0);
+                                 const attendRate = pRating?.breakdown ? (pRating.breakdown.partidosAsistidos / (pRating.breakdown.partidosComputables || 1)) : 0;
+                                 
+                                 return (
+                                   <>
+                                     {goals >= 3 && (
+                                       <Badge className="text-[7px] h-4 px-1 bg-amber-50 text-amber-700 border-amber-100 font-black">
+                                         GOLS
+                                       </Badge>
+                                     )}
+                                     {attendRate >= 0.85 && (
+                                       <Badge className="text-[7px] h-4 px-1 bg-blue-50 text-blue-700 border-blue-100 font-black">
+                                         REG.
+                                       </Badge>
+                                     )}
+                                   </>
+                                 );
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end shrink-0">
+                          <span className="text-[10px] font-black text-emerald-600">{allPlayerRatings.find(r => r.id === player.id)?.rating || 0}</span>
+                          <span className="text-[8px] font-bold text-gray-300 uppercase leading-none mt-0.5">Baremo</span>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[10px] text-gray-400 bg-gray-100/50 p-3 rounded-xl border border-gray-100/50">
+                    <Info size={12} className="shrink-0" />
+                    <p>Criterio: 1 Portero, dibujo 2-3-1 (7 titulares) + 3 suplentes balanceados. Basado en goles, regularidad y baremo actual.</p>
+                  </div>
+
+                  <Button 
+                    className="w-full bg-black hover:bg-gray-800 text-white font-bold rounded-xl h-11"
+                    onClick={() => setRecommendedMatchId(null)}
+                  >
+                    Cerrar Informe
+                  </Button>
+                </div>
+              );
+            })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function Label({ children, className }: { children: React.ReactNode, className?: string }) {
+  return <label className={cn("text-sm font-medium leading-none", className)}>{children}</label>;

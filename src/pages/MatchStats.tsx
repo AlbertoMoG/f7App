@@ -31,7 +31,7 @@ import {
   TableRow 
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ArrowLeft, Save, Trophy, Users, ShieldAlert, CheckCircle2, Stethoscope } from 'lucide-react';
+import { ArrowLeft, Save, Trophy, Users, ShieldAlert, CheckCircle2, Stethoscope, XCircle, ShieldCheck, HelpCircle, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -45,6 +45,7 @@ export default function MatchStats() {
   const [match, setMatch] = useState<Match | null>(null);
   const [season, setSeason] = useState<Season | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [seasonPlayerIds, setSeasonPlayerIds] = useState<string[]>([]);
   const [stats, setStats] = useState<PlayerStat[]>([]);
   const [opponent, setOpponent] = useState<Opponent | null>(null);
   const [team, setTeam] = useState<Team | null>(null);
@@ -54,16 +55,31 @@ export default function MatchStats() {
   const [localStats, setLocalStats] = useState<Record<string, Partial<PlayerStat>>>({});
   const [scoreOpponent, setScoreOpponent] = useState<number>(0);
 
-  const visiblePlayers = React.useMemo(() => {
+  // We compute players to show based on season assignment OR presence in current stats
+  const playersToShow = React.useMemo(() => {
+    // We want to show all players assigned to this season
+    // Plus any players that already have stats for this match (even if they were moved out of the season)
     return players.filter(p => {
-      const hasStats = stats.some(s => s.playerId === p.id);
-      const activeInjury = injuries.some(i => i.playerId === p.id && !i.endDate);
-      return (p.isActive !== false && !activeInjury) || hasStats;
+      const isIngameSeason = seasonPlayerIds.includes(p.id);
+      const hasStatsForMatch = stats.some(s => s.playerId === p.id);
+      return isIngameSeason || hasStatsForMatch;
     });
-  }, [players, stats, injuries]);
+  }, [players, seasonPlayerIds, stats]);
+
+  const visiblePlayers = React.useMemo(() => {
+    return playersToShow.filter(p => {
+      const hasStats = stats.some(s => s.playerId === p.id);
+      return p.isActive !== false || hasStats;
+    });
+  }, [playersToShow, stats]);
 
   useEffect(() => {
     if (!matchId) return;
+
+    let unsubPlayers: (() => void) | undefined;
+    let unsubStats: (() => void) | undefined;
+    let unsubInjuries: (() => void) | undefined;
+    let unsubPlayerSeasons: (() => void) | undefined;
 
     const fetchData = async () => {
       try {
@@ -89,42 +105,46 @@ export default function MatchStats() {
           setOpponent({ id: opponentDoc.id, ...opponentDoc.data() } as Opponent);
         }
 
-        // Fetch PlayerSeasons for this season
+        // Fetch PlayerSeasons for this season (Reactive)
         const psQuery = query(collection(db, 'playerSeasons'), where('seasonId', '==', matchData.seasonId));
-        const psSnapshot = await getDocs(psQuery);
-        const seasonPlayerIds = psSnapshot.docs.map(d => d.data().playerId);
+        unsubPlayerSeasons = onSnapshot(psQuery, (snapshot) => {
+          setSeasonPlayerIds(snapshot.docs.map(d => d.data().playerId));
+        });
 
         // Fetch Players
         const playersQuery = query(collection(db, 'players'), where('teamId', '==', matchData.teamId));
-        onSnapshot(playersQuery, (snapshot) => {
-          const playersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Player));
-          
-          // We need to get current stats to know which players have stats
-          getDocs(query(collection(db, 'playerStats'), where('matchId', '==', matchId))).then(statsSnap => {
-            const playersWithStats = statsSnap.docs.map(d => d.data().playerId);
-            // Filter: Show players that are in this season OR players who already have stats for this match
-            setPlayers(playersData.filter(p => seasonPlayerIds.includes(p.id) || playersWithStats.includes(p.id)));
-          });
+        unsubPlayers = onSnapshot(playersQuery, (snapshot) => {
+          setPlayers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Player)));
         });
 
         // Fetch Stats
         const statsQuery = query(collection(db, 'playerStats'), where('matchId', '==', matchId));
-        onSnapshot(statsQuery, (snapshot) => {
+        unsubStats = onSnapshot(statsQuery, (snapshot) => {
           const statsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlayerStat));
           setStats(statsData);
           
-          // Initialize local stats
-          const initialLocalStats: Record<string, Partial<PlayerStat>> = {};
-          snapshot.docs.forEach(doc => {
-            const s = doc.data() as PlayerStat;
-            initialLocalStats[s.playerId] = { id: doc.id, ...s };
+          // Initialize local stats from server
+          setLocalStats(prev => {
+            const next = { ...prev };
+            statsData.forEach(s => {
+              // If we don't have local info for this player, load from server
+              // Or if we do, merge keeping local changes? 
+              // Usually we want to load initial data and then let user decide.
+              if (!next[s.playerId]) {
+                next[s.playerId] = s;
+              } else {
+                // If it exists locally, we only update if it came from server and we haven't touched it?
+                // For now, let's just make sure server data is available.
+                next[s.playerId] = { ...s, ...next[s.playerId] };
+              }
+            });
+            return next;
           });
-          setLocalStats(prev => ({ ...initialLocalStats, ...prev }));
         });
 
         // Fetch Injuries
         const injuriesQuery = query(collection(db, 'injuries'), where('teamId', '==', matchData.teamId));
-        onSnapshot(injuriesQuery, (snapshot) => {
+        unsubInjuries = onSnapshot(injuriesQuery, (snapshot) => {
           setInjuries(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Injury)));
         });
 
@@ -136,6 +156,13 @@ export default function MatchStats() {
     };
 
     fetchData();
+
+    return () => {
+      unsubPlayers?.();
+      unsubStats?.();
+      unsubInjuries?.();
+      unsubPlayerSeasons?.();
+    };
   }, [matchId, navigate]);
 
   // Handle team data separately to ensure it's loaded
@@ -176,13 +203,22 @@ export default function MatchStats() {
         const existing = stats.find(s => s.playerId === p.id);
         const local = localStats[p.id] || { attendance: 'noResponse', goals: 0, assists: 0, yellowCards: 0, redCards: 0 };
         
+        let finalAttendance = (local.attendance as Attendance) || 'noResponse';
+        let wasDoubtful = existing?.wasDoubtful || local.attendance === 'doubtful';
+        
+        if (shouldFinalize && finalAttendance === 'doubtful') {
+          finalAttendance = 'notAttending';
+          wasDoubtful = true;
+        }
+
         return {
           id: existing?.id || local.id || '',
           teamId: match.teamId,
           playerId: p.id,
           matchId: matchId,
           seasonId: match.seasonId,
-          attendance: (local.attendance as Attendance) || 'noResponse',
+          attendance: finalAttendance,
+          wasDoubtful,
           goals: local.goals || 0,
           assists: local.assists || 0,
           yellowCards: local.yellowCards || 0,
@@ -232,7 +268,8 @@ export default function MatchStats() {
   const attendingCount = visiblePlayers.filter(p => localStats[p.id]?.attendance === 'attending').length;
   const justifiedCount = visiblePlayers.filter(p => localStats[p.id]?.attendance === 'justified').length;
   const notAttendingCount = visiblePlayers.filter(p => localStats[p.id]?.attendance === 'notAttending').length;
-  const noResponseCount = visiblePlayers.filter(p => localStats[p.id]?.attendance === 'noResponse').length;
+  const doubtfulCount = visiblePlayers.filter(p => localStats[p.id]?.attendance === 'doubtful').length;
+  const noResponseCount = visiblePlayers.filter(p => (localStats[p.id]?.attendance || 'noResponse') === 'noResponse').length;
 
   return (
     <div className="min-h-screen bg-[#F5F5F0] pb-20">
@@ -378,9 +415,12 @@ export default function MatchStats() {
                         {attendingCount} {attendingCount === 1 ? 'Jugador asiste' : 'Jugadores asisten'}
                       </span>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2 justify-end">
                       {justifiedCount > 0 && (
                         <span className="text-[10px] font-bold text-blue-600 uppercase bg-blue-50 px-2 py-1 rounded-md border border-blue-100">{justifiedCount} Justificados</span>
+                      )}
+                      {doubtfulCount > 0 && (
+                        <span className="text-[10px] font-bold text-amber-600 uppercase bg-amber-50 px-2 py-1 rounded-md border border-amber-100">{doubtfulCount} Duda</span>
                       )}
                       {notAttendingCount > 0 && (
                         <span className="text-[10px] font-bold text-red-600 uppercase bg-red-50 px-2 py-1 rounded-md border border-red-100">{notAttendingCount} No Asisten</span>
@@ -421,6 +461,7 @@ export default function MatchStats() {
                             </TableRow>
                             {posPlayers.map((player, i) => {
                               const isInjured = injuries.some(inj => inj.playerId === player.id && !inj.endDate);
+                              const attendance = localStats[player.id]?.attendance || 'noResponse';
                               
                               return (
                                 <motion.tr 
@@ -428,23 +469,40 @@ export default function MatchStats() {
                                   initial={{ opacity: 0, y: 10 }}
                                   animate={{ opacity: 1, y: 0 }}
                                   transition={{ delay: i * 0.03 }}
-                                  className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
+                                  className={cn(
+                                    "border-b border-gray-50 transition-all duration-300",
+                                    attendance === 'attending' ? "bg-emerald-50/40 hover:bg-emerald-50/60" :
+                                    attendance === 'notAttending' ? "bg-red-50/40 hover:bg-red-50/60" :
+                                    attendance === 'justified' ? "bg-blue-50/40 hover:bg-blue-50/60" :
+                                    attendance === 'doubtful' ? "bg-amber-50/40 hover:bg-amber-50/60" :
+                                    "hover:bg-gray-50/50"
+                                  )}
                                 >
                                   <TableCell className="pl-8 py-4">
                                     <div className="flex items-center gap-3">
                                       <div className={cn(
-                                        "w-8 h-8 rounded-full flex items-center justify-center font-black text-xs",
+                                        "w-8 h-8 rounded-full flex items-center justify-center font-black text-xs transition-colors",
+                                        attendance === 'attending' ? "bg-emerald-600 text-white" :
+                                        attendance === 'notAttending' ? "bg-red-600 text-white" :
+                                        attendance === 'justified' ? "bg-blue-600 text-white" :
+                                        attendance === 'doubtful' ? "bg-amber-600 text-white" :
                                         isInjured ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"
                                       )}>
-                                        {isInjured ? <Stethoscope size={14} /> : player.number}
+                                        {isInjured && attendance !== 'attending' ? <Stethoscope size={14} /> : player.number}
                                       </div>
                                       <div>
                                         <div className="flex items-center gap-2">
-                                          <p className="font-bold text-sm">
+                                          <p className={cn(
+                                            "font-bold text-sm transition-colors",
+                                            attendance === 'attending' ? "text-emerald-900" :
+                                            attendance === 'notAttending' ? "text-red-900" :
+                                            attendance === 'justified' ? "text-blue-900" : 
+                                            attendance === 'doubtful' ? "text-amber-900" : "text-gray-900"
+                                          )}>
                                             {player.alias || `${player.firstName} ${player.lastName}`}
                                           </p>
                                           {isInjured && (
-                                            <span className="text-[8px] bg-red-500 text-white px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter">Lesionado</span>
+                                            <span className="text-[8px] bg-red-500 text-white px-1.5 py-0.5 rounded-md font-black uppercase tracking-tighter shadow-sm">Lesionado</span>
                                           )}
                                         </div>
                                         <p className="text-[10px] text-gray-400 font-bold uppercase">{player.position}</p>
@@ -453,25 +511,63 @@ export default function MatchStats() {
                                   </TableCell>
                                   <TableCell className="py-4">
                                     <Select 
-                                      value={localStats[player.id]?.attendance || 'noResponse'} 
+                                      value={attendance} 
                                       onValueChange={(v) => updatePlayerStat(player.id, 'attendance', v)}
                                     >
                                       <SelectTrigger className={cn(
-                                        "h-9 w-32 border-none rounded-xl text-xs font-bold",
-                                        isInjured && localStats[player.id]?.attendance !== 'attending' ? "bg-red-50 text-red-700" : "bg-gray-100"
+                                        "h-9 w-36 border-none rounded-xl text-xs font-bold shadow-sm transition-all",
+                                        attendance === 'attending' ? "bg-emerald-600 text-white" :
+                                        attendance === 'notAttending' ? "bg-red-600 text-white" :
+                                        attendance === 'justified' ? "bg-blue-600 text-white" :
+                                        attendance === 'doubtful' ? "bg-amber-600 text-white" :
+                                        "bg-gray-100 text-gray-700"
                                       )}>
-                                        <SelectValue>
-                                          {localStats[player.id]?.attendance === 'attending' ? 'Asiste' : 
-                                           localStats[player.id]?.attendance === 'notAttending' ? 'No asiste' : 
-                                           localStats[player.id]?.attendance === 'justified' ? 'Justificado' :
-                                           'Sin rpta'}
-                                        </SelectValue>
+                                        <div className="flex items-center gap-2">
+                                          {attendance === 'attending' && <CheckCircle2 size={14} />}
+                                          {attendance === 'notAttending' && <XCircle size={14} />}
+                                          {attendance === 'justified' && <ShieldCheck size={14} />}
+                                          {attendance === 'doubtful' && <AlertCircle size={14} />}
+                                          {attendance === 'noResponse' && <HelpCircle size={14} />}
+                                          <SelectValue>
+                                            {attendance === 'attending' ? 'Asiste' : 
+                                             attendance === 'notAttending' ? 'No asiste' : 
+                                             attendance === 'justified' ? 'Justificado' :
+                                             attendance === 'doubtful' ? 'Duda' :
+                                             'Sin rpta'}
+                                          </SelectValue>
+                                        </div>
                                       </SelectTrigger>
                                       <SelectContent className="rounded-xl border-none shadow-xl">
-                                        <SelectItem value="attending" disabled={isInjured}>Asiste</SelectItem>
-                                        <SelectItem value="notAttending">No asiste</SelectItem>
-                                        <SelectItem value="justified">Justificado</SelectItem>
-                                        <SelectItem value="noResponse">Sin rpta</SelectItem>
+                                        <SelectItem value="attending" disabled={isInjured}>
+                                          <div className="flex items-center gap-2">
+                                            <CheckCircle2 size={14} className="text-emerald-500" />
+                                            <span>Asiste</span>
+                                          </div>
+                                        </SelectItem>
+                                        <SelectItem value="doubtful">
+                                          <div className="flex items-center gap-2">
+                                            <AlertCircle size={14} className="text-amber-500" />
+                                            <span>Duda</span>
+                                          </div>
+                                        </SelectItem>
+                                        <SelectItem value="notAttending">
+                                          <div className="flex items-center gap-2">
+                                            <XCircle size={14} className="text-red-500" />
+                                            <span>No asiste</span>
+                                          </div>
+                                        </SelectItem>
+                                        <SelectItem value="justified">
+                                          <div className="flex items-center gap-2">
+                                            <ShieldCheck size={14} className="text-blue-500" />
+                                            <span>Justificado</span>
+                                          </div>
+                                        </SelectItem>
+                                        <SelectItem value="noResponse">
+                                          <div className="flex items-center gap-2">
+                                            <HelpCircle size={14} className="text-gray-400" />
+                                            <span>Sin rpta</span>
+                                          </div>
+                                        </SelectItem>
                                       </SelectContent>
                                     </Select>
                                   </TableCell>

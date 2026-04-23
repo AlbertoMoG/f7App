@@ -1,0 +1,573 @@
+  const predictions = React.useMemo(() => {
+    // Usamos 'matches' y 'stats' directamente para ignorar el filtro de temporada en la predicción histórica
+    if (matches.length === 0 || allPlayerRatings.length === 0) 
+      return new Map<string, { 
+        team: number, 
+        opponent: number, 
+        confidence: 'Alta' | 'Media' | 'Baja', 
+        reasons: string[],
+        probabilities: { win: number, draw: number, loss: number },
+        recommendedSquad: Player[],
+        recommendedProbabilities: { win: number, draw: number, loss: number }
+      }>();
+    
+    const teamAvgBaremo = allPlayerRatings.reduce((a, b) => a + b.rating, 0) / allPlayerRatings.length;
+    const allMatchesWithScores = matches
+      .filter(m => m.scoreTeam != null && m.scoreOpponent != null)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // De más reciente a más antiguo
+
+    const globalAvgGF = allMatchesWithScores.reduce((acc, m) => acc + (m.scoreTeam || 0), 0) / (allMatchesWithScores.length || 1);
+    const globalAvgGC = allMatchesWithScores.reduce((acc, m) => acc + (m.scoreOpponent || 0), 0) / (allMatchesWithScores.length || 1);
+    
+    // --- 0. AI Learning & Calibration (Feedback Loop) ---
+    // Analizamos los últimos 5 resultados para ajustar el sesgo (Bias) del modelo
+    const calibrationMatches = allMatchesWithScores.slice(0, 5);
+    let biasGF = 0;
+    let biasGC = 0;
+    
+    if (calibrationMatches.length > 0) {
+      calibrationMatches.forEach(m => {
+        // Estimación simplificada de lo que el modelo "esperaba"
+        const historicalInPos = allMatchesWithScores.filter(am => am.opponentId === m.opponentId);
+        const expectedGF = historicalInPos.length > 0
+          ? historicalInPos.reduce((a, b) => a + (b.scoreTeam || 0), 0) / historicalInPos.length
+          : globalAvgGF;
+        const expectedGC = historicalInPos.length > 0
+          ? historicalInPos.reduce((a, b) => a + (b.scoreOpponent || 0), 0) / historicalInPos.length
+          : globalAvgGC;
+          
+        biasGF += (m.scoreTeam || 0) - expectedGF;
+        biasGC += (m.scoreOpponent || 0) - expectedGC;
+      });
+      biasGF = (biasGF / calibrationMatches.length) * 0.4; // Ajuste moderado (40% de agresividad)
+      biasGC = (biasGC / calibrationMatches.length) * 0.4;
+    }
+    
+    // --- 1. Clasificación (Stats en Liga) ---
+    const getStandingsStats = (seasonId: string, opponentId: string) => {
+      const isMyTeam = opponentId === 'my-team';
+      const manualEntry = standings.find(s => s.seasonId === seasonId && s.opponentId === opponentId);
+      
+      const relevantMatches = matches.filter(m => 
+        m.seasonId === seasonId && 
+        (isMyTeam ? true : m.opponentId === opponentId) &&
+        m.status === 'completed' && 
+        m.type === 'league'
+      );
+      
+      let autoGF = 0;
+      let autoGC = 0;
+      let autoP = 0;
+      let autoPts = 0;
+      relevantMatches.forEach(m => {
+        if (m.scoreTeam != null && m.scoreOpponent != null) {
+          autoP++;
+          const tScore = isMyTeam ? m.scoreTeam : m.scoreOpponent;
+          const oScore = isMyTeam ? m.scoreOpponent : m.scoreTeam;
+          autoGF += tScore;
+          autoGC += oScore;
+          if (tScore > oScore) autoPts += 3;
+          else if (tScore === oScore) autoPts += 1;
+        }
+      });
+
+      return {
+        played: (manualEntry?.played || 0) + autoP,
+        goalsFor: (manualEntry?.goalsFor || 0) + autoGF,
+        goalsAgainst: (manualEntry?.goalsAgainst || 0) + autoGC,
+        points: (manualEntry?.points || 0) + autoPts
+      };
+    };
+
+    // --- 1. Racha del Equipo (Últimos 5 partidos) ---
+    const last5Matches = allMatchesWithScores.slice(0, 5);
+    const momentumGF = last5Matches.reduce((acc, m) => acc + (m.scoreTeam || 0), 0) / (last5Matches.length || 1);
+    const momentumGC = last5Matches.reduce((acc, m) => acc + (m.scoreOpponent || 0), 0) / (last5Matches.length || 1);
+    const momentumModifierGF = last5Matches.length > 0 ? (momentumGF / (globalAvgGF || 1)) : 1.0;
+    const momentumModifierGC = last5Matches.length > 0 ? (momentumGC / (globalAvgGC || 1)) : 1.0;
+
+    // --- 2. Identificación de Jugadores Clave y Win-Rates ---
+    const keyPlayerIds = allPlayerRatings.slice(0, 3).map(p => p.id);
+    
+    // Win rate individual por jugador
+    const playerWinRates = new Map<string, number>();
+    players.forEach(p => {
+      const pMatches = allMatchesWithScores.filter(m => 
+        stats.some(s => s.matchId === m.id && s.playerId === p.id && s.attendance === 'attending')
+      );
+      if (pMatches.length >= 3) {
+        const wins = pMatches.filter(m => (m.scoreTeam || 0) > (m.scoreOpponent || 0)).length;
+        playerWinRates.set(p.id, wins / pMatches.length);
+      }
+    });
+
+    // Análisis de Clean Sheets Recientes
+    const recentCleanSheets = last5Matches.filter(m => (m.scoreOpponent || 0) === 0).length;
+
+    // --- Análisis de Forma Individual (Jugadores en Racha) ---
+    const recent3Matches = allMatchesWithScores.slice(0, 3);
+    const inFormPlayers = new Set<string>();
+    recent3Matches.forEach(m => {
+      const matchStats = stats.filter(s => s.matchId === m.id && s.attendance === 'attending');
+      matchStats.forEach(s => {
+        if ((s.goals || 0) > 0 || (s.assists || 0) > 0) {
+          inFormPlayers.add(s.playerId);
+        }
+      });
+    });
+
+    const poisson = (lambda: number, k: number) => {
+      const factorial = (n: number): number => (n <= 1 ? 1 : n * factorial(n - 1));
+      return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
+    };
+
+    const getMostProbableScore = (lambdaGF: number, lambdaGC: number) => {
+      let maxProb = 0;
+      let score = { team: 0, opponent: 0 };
+      for (let i = 0; i <= 6; i++) {
+        for (let j = 0; j <= 6; j++) {
+          const prob = poisson(lambdaGF, i) * poisson(lambdaGC, j);
+          if (prob > maxProb) {
+            maxProb = prob;
+            score = { team: i, opponent: j };
+          }
+        }
+      }
+      return score;
+    };
+
+    const calculateAge = (birthDate: string) => {
+      if (!birthDate) return 25;
+      const birth = new Date(birthDate);
+      const today = new Date();
+      let age = today.getFullYear() - birth.getFullYear();
+      const m = today.getMonth() - birth.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+        age--;
+      }
+      return age;
+    };
+
+    const predictionMap = new Map<string, { 
+      team: number, 
+      opponent: number, 
+      confidence: 'Alta' | 'Media' | 'Baja',
+      reasons: string[],
+      probabilities: { win: number, draw: number, loss: number },
+      recommendedSquad: Player[],
+      recommendedProbabilities: { win: number, draw: number, loss: number }
+    }>();
+    
+    scheduledMatches.forEach(match => {
+      const reasons: string[] = [];
+      // 3. Historial Directo (Todas las temporadas)
+      const vsOppMatches = allMatchesWithScores.filter(m => m.opponentId === match.opponentId);
+      
+      // 4. Calidad de la Convocatoria Actual
+      const matchStats = stats.filter(s => s.matchId === match.id);
+      const attendingIds = matchStats.filter(s => s.attendance === 'attending').map(s => s.playerId);
+      const confirmedMissingIds = matchStats.filter(s => s.attendance === 'notAttending').map(s => s.playerId);
+      
+      const currentAttendingPlayers = players.filter(p => attendingIds.includes(p.id));
+      const currentAttendingRatings = allPlayerRatings
+        .filter(p => attendingIds.includes(p.id))
+        .map(p => p.rating);
+      
+      const currentSquadSize = currentAttendingRatings.length;
+      if (currentSquadSize < 5) return; // Mínimo 5 para predecir
+
+      const currentAvgBaremo = currentSquadSize > 0 
+        ? currentAttendingRatings.reduce((a, b) => a + b, 0) / currentSquadSize 
+        : teamAvgBaremo;
+
+      if (currentSquadSize > 0) {
+        const diff = ((currentAvgBaremo / (teamAvgBaremo || 1)) - 1) * 100;
+        if (diff > 5) reasons.push(`Nivel técnico superior (+${diff.toFixed(0)}% del nivel medio)`);
+        else if (diff < -5) reasons.push(`Nivel técnico inferior (${diff.toFixed(0)}%)`);
+        else reasons.push('Nivel técnico equilibrado');
+      }
+
+      // --- 4.1 Win Rate de la Convocatoria ---
+      const attendingWinRates = currentAttendingPlayers
+        .map(p => playerWinRates.get(p.id))
+        .filter((wr): wr is number => wr !== undefined);
+      
+      if (attendingWinRates.length > 0) {
+        const avgWR = attendingWinRates.reduce((a, b) => a + b, 0) / attendingWinRates.length;
+        if (avgWR > 0.6) reasons.push('Plantilla con alto ratio de victoria histórico');
+        else if (avgWR < 0.4) reasons.push('Ratio de victorias discreto en los convocados');
+      }
+
+      // --- 4.2 Equilibrio Táctico ---
+      const hasGoalkeeper = currentAttendingPlayers.some(p => p.position === 'Portero');
+      const defendersCount = currentAttendingPlayers.filter(p => p.position === 'Defensa').length;
+      const attackersCount = currentAttendingPlayers.filter(p => p.position === 'Delantero').length;
+
+      let tacticalModifierGC = 1.0;
+      let tacticalModifierGF = 1.0;
+
+      if (!hasGoalkeeper) {
+        reasons.push('Aviso: Sin portero especialista (Sube riesgo de gol)');
+        tacticalModifierGC *= 1.35;
+      } else {
+        reasons.push('Portería cubierta por especialista');
+      }
+
+      if (defendersCount < 2 && currentSquadSize >= 7) {
+        reasons.push('Pocos defensas naturales confirmados');
+        tacticalModifierGC *= 1.2;
+      } else if (defendersCount >= 3) {
+        reasons.push('Sólida base defensiva en la convocatoria');
+        tacticalModifierGC *= 0.9;
+      }
+
+      if (attackersCount >= 3) {
+        reasons.push('Alta presencia de delanteros confirmada');
+        tacticalModifierGF *= 1.15;
+      }
+
+      // --- 4.3 Sinergia y Química entre Jugadores (Dúos Letales) ---
+      let synergiesFound = 0;
+      let topSynergyName = "";
+      for (let i = 0; i < currentAttendingPlayers.length; i++) {
+        for (let j = i + 0; j < currentAttendingPlayers.length; j++) {
+          if (i === j) continue;
+          const p1 = currentAttendingPlayers[i];
+          const p2 = currentAttendingPlayers[j];
+          
+          const matchesTogether = allMatchesWithScores.filter(m => 
+            stats.some(s => s.matchId === m.id && s.playerId === p1.id && s.attendance === 'attending') &&
+            stats.some(s => s.matchId === m.id && s.playerId === p2.id && s.attendance === 'attending')
+          );
+          
+          if (matchesTogether.length >= 3) {
+            const winsTogether = matchesTogether.filter(m => (m.scoreTeam || 0) > (m.scoreOpponent || 0)).length;
+            if (winsTogether / matchesTogether.length >= 0.70) {
+              synergiesFound++;
+              if (synergiesFound === 1) topSynergyName = `${p1.firstName} & ${p2.firstName}`;
+            }
+          }
+        }
+      }
+
+      // To avoid double counting A-B and B-A we divide by 2
+      synergiesFound = Math.floor(synergiesFound / 2);
+
+      if (synergiesFound > 0) {
+        reasons.push(`Química letal: ${synergiesFound} dúo(s) ganador(es) en campo (ej. ${topSynergyName})`);
+        tacticalModifierGF *= (1 + (0.05 * synergiesFound));
+        tacticalModifierGC *= (1 - (0.05 * synergiesFound));
+      }
+
+      // --- 4.4 Forma Individual Reciente (Jugadores en Racha) ---
+      const attendingInForm = currentAttendingPlayers.filter(p => inFormPlayers.has(p.id));
+      if (attendingInForm.length >= 2) {
+        reasons.push(`${attendingInForm.length} jugadores en excelente racha individual reciente`);
+        tacticalModifierGF *= (1 + (0.08 * attendingInForm.length));
+      } else if (attendingInForm.length === 1) {
+        reasons.push(`${attendingInForm[0].firstName} llega en racha goleadora/asistente`);
+        tacticalModifierGF *= 1.08;
+      }
+
+      let predGF = (globalAvgGF + momentumGF) / 2;
+      let predGC = (globalAvgGC + momentumGC) / 2;
+      let confidence: 'Alta' | 'Media' | 'Baja' = 'Baja';
+
+      if (vsOppMatches.length > 0) {
+        reasons.push(`Basado en ${vsOppMatches.length} enfrentamiento(s) previo(s)`);
+        let totalAdjustedGF = 0;
+        let totalAdjustedGC = 0;
+        let totalWeight = 0;
+
+        vsOppMatches.forEach(prevMatch => {
+          const prevSquadStats = stats.filter(s => s.matchId === prevMatch.id && s.attendance === 'attending');
+          const prevSquadSize = prevSquadStats.length;
+          
+          const prevAvgBaremo = prevSquadSize > 0 
+            ? prevSquadStats.reduce((acc, s) => {
+                const pRating = allPlayerRatings.find(p => p.id === s.playerId)?.rating || teamAvgBaremo;
+                return acc + pRating;
+              }, 0) / prevSquadSize
+            : teamAvgBaremo;
+
+          const attendanceEffect = (prevSquadSize < 9 && currentSquadSize >= 9) ? 1.25 : 1.0;
+          const qualityRatio = currentAvgBaremo / (prevAvgBaremo || teamAvgBaremo);
+          
+          const matchAgeDays = (new Date().getTime() - new Date(prevMatch.date).getTime()) / (1000 * 60 * 60 * 24);
+          const recencyWeight = Math.max(0.1, 1 - (matchAgeDays / 730)); // 2 años de ventana
+
+          totalAdjustedGF += (prevMatch.scoreTeam || 0) * qualityRatio * attendanceEffect * recencyWeight;
+          totalAdjustedGC += (prevMatch.scoreOpponent || 0) * (1/qualityRatio) * (1/attendanceEffect) * recencyWeight;
+          totalWeight += recencyWeight;
+        });
+
+        predGF = totalAdjustedGF / (totalWeight || 1);
+        predGC = totalAdjustedGC / (totalWeight || 1);
+        confidence = vsOppMatches.length >= 3 ? 'Alta' : 'Media';
+      } else {
+        reasons.push('Sin historial previo directo; analizando racha y nivel general');
+        const squadRatio = currentAvgBaremo / (teamAvgBaremo || 1);
+        predGF = globalAvgGF * squadRatio * ((momentumModifierGF + 1) / 2);
+        predGC = globalAvgGC * (1/squadRatio) * ((momentumModifierGC + 1) / 2);
+      }
+
+      // --- 4.1 Edad Media y Equilibrio ---
+      if (currentSquadSize > 0) {
+        const ages = currentAttendingPlayers.map(p => calculateAge(p.birthDate));
+        const avgAge = ages.reduce((a, b) => a + b, 0) / ages.length;
+        
+        let ageModifier = 1.0;
+        if (avgAge < 22) {
+          ageModifier = 0.9;
+          reasons.push(`Plantilla muy joven (${avgAge.toFixed(1)} años): Vigor pero falta de experiencia`);
+        } else if (avgAge >= 22 && avgAge < 26) {
+          ageModifier = 1.05;
+          reasons.push(`Media de edad ideal (${avgAge.toFixed(1)} años): Gran capacidad física`);
+        } else if (avgAge >= 26 && avgAge < 32) {
+          ageModifier = 1.1;
+          reasons.push(`Punto de madurez deportivo (${avgAge.toFixed(1)} años)`);
+        } else {
+          ageModifier = 0.95;
+          reasons.push(`Alta veteranía (${avgAge.toFixed(1)} años): Control pero riesgo físico`);
+        }
+
+        const youngCount = ages.filter(a => a < 25).length;
+        const veteranCount = ages.filter(a => a >= 30).length;
+        if (youngCount >= 3 && veteranCount >= 3) {
+          ageModifier *= 1.05;
+          reasons.push('Excelente equilibrio entre juventud y veteranía');
+        }
+
+        predGF *= ageModifier;
+        predGC *= (2 - ageModifier);
+      }
+
+      // --- 5. Bajas Clave (Penalización Directa) ---
+      const missingKeyPlayersCount = keyPlayerIds.filter(id => confirmedMissingIds.includes(id)).length;
+      if (missingKeyPlayersCount > 0) {
+        reasons.push(`Baja de ${missingKeyPlayersCount} jugador(es) clave`);
+        const attackPenalty = 1 - (missingKeyPlayersCount * 0.15);
+        const defensePenalty = 1 + (missingKeyPlayersCount * 0.10);
+        predGF *= attackPenalty;
+        predGC *= defensePenalty;
+      }
+
+      // --- 6. Horario y Condiciones ---
+      const matchHour = new Date(match.date).getHours();
+      const sameHourMatches = allMatchesWithScores.filter(m => new Date(m.date).getHours() === matchHour);
+      if (sameHourMatches.length >= 3) {
+        const hourAvgGF = sameHourMatches.reduce((acc, m) => acc + (m.scoreTeam || 0), 0) / sameHourMatches.length;
+        const hourAvgGC = sameHourMatches.reduce((acc, m) => acc + (m.scoreOpponent || 0), 0) / sameHourMatches.length;
+        const hourModifierGF = hourAvgGF / (globalAvgGF || 1);
+        if (hourModifierGF > 1.1) reasons.push('Historial positivo en esta franja horaria');
+        else if (hourModifierGF < 0.9) reasons.push('Historial complicado en este horario');
+        predGF *= (1 + (hourModifierGF - 1) * 0.3);
+        predGC *= (1 + ((hourAvgGC / (globalAvgGC || 1)) - 1) * 0.3);
+      }
+
+      // --- 7. Efecto Banquillo / Fatiga de Calendario ---
+      if (currentSquadSize > 10) {
+        reasons.push(`Amplia rotación disponible (${currentSquadSize} jugadores)`);
+        predGF *= 1.10;
+        predGC *= 0.90;
+      } else if (currentSquadSize > 0 && currentSquadSize < 8) {
+        reasons.push(`Convocatoria escasa (${currentSquadSize} jugadores): Riesgo de fatiga`);
+        predGF *= 0.75;
+        predGC *= 1.30;
+      }
+
+      const matchDate = new Date(match.date);
+      const lastMatch = allMatchesWithScores.find(m => new Date(m.date).getTime() < matchDate.getTime());
+      if (lastMatch) {
+         const daysSinceLastMatch = (matchDate.getTime() - new Date(lastMatch.date).getTime()) / (1000 * 60 * 60 * 24);
+         if (daysSinceLastMatch <= 4) {
+             reasons.push('Aviso de fatiga: Calendario denso (partido reciente hace < 4 días)');
+             predGC *= 1.15; 
+             predGF *= 0.90; 
+         } else if (daysSinceLastMatch >= 10) {
+             reasons.push('Equipo totalmente descansado (> 10 días sin jugar)');
+             predGF *= 1.05;
+         }
+      }
+
+      // --- 8. Factor Clasificación y Goles ---
+      const myStats = getStandingsStats(match.seasonId, 'my-team');
+      const oppStats = getStandingsStats(match.seasonId, match.opponentId);
+      
+      const ptsDiff = myStats.points - oppStats.points;
+      if (ptsDiff > 10) reasons.push('Superioridad clara en la tabla de clasificación');
+      else if (ptsDiff < -10) reasons.push('Rival en posición superior en la tabla');
+      
+      // Ajuste basado en la media de goles de la temporada (Global)
+      const myAvgGF = myStats.played > 0 ? myStats.goalsFor / myStats.played : globalAvgGF;
+      const myAvgGC = myStats.played > 0 ? myStats.goalsAgainst / myStats.played : globalAvgGC;
+      const oppAvgGF = oppStats.played > 0 ? oppStats.goalsFor / oppStats.played : globalAvgGC;
+      const oppAvgGC = oppStats.played > 0 ? oppStats.goalsAgainst / oppStats.played : globalAvgGF;
+
+      // El factor clasificación ajusta la tendencia
+      const standingsModifier = 1 + (ptsDiff / 100); 
+      const clampedModifier = Math.min(Math.max(standingsModifier, 0.7), 1.3);
+      
+      // Combinamos: (Historial + Momentum + Calidad Plantilla) con (Medias Temporada Global)
+      // Damos un peso del 30% a las medias globales de la liga
+      predGF = (predGF * 0.7) + (((myAvgGF + oppAvgGC) / 2) * 0.3);
+      predGC = (predGC * 0.7) + (((oppAvgGF + myAvgGC) / 2) * 0.3);
+
+      predGF *= (clampedModifier * (tacticalModifierGF || 1));
+      predGC *= ((2 - clampedModifier) * (tacticalModifierGC || 1));
+
+      // --- 9. Clean Sheets Recent (Defensa) ---
+      if (recentCleanSheets >= 2) {
+        reasons.push(`Gran racha defensiva (${recentCleanSheets} porterías a cero recientemente)`);
+        predGC *= 0.85;
+      }
+
+      // --- 9.5 AI Learning Correction ---
+      // Aplicamos el bias calculado al inicio del memo
+      if (Math.abs(biasGF) > 0.1 || Math.abs(biasGC) > 0.1) {
+        predGF = Math.max(0.1, predGF + biasGF);
+        predGC = Math.max(0.1, predGC + biasGC);
+        reasons.push('Módulo de Aprendizaje: Ajuste aplicado por calibración histórica');
+      }
+
+      // --- 10. Aplicar Poisson para el Resultado Final y Probabilidades ---
+      const mostProbableScore = getMostProbableScore(predGF, predGC);
+      
+      let winProb = 0;
+      let drawProb = 0;
+      let lossProb = 0;
+
+      for (let i = 0; i <= 8; i++) {
+        for (let j = 0; j <= 8; j++) {
+          const prob = poisson(predGF, i) * poisson(predGC, j);
+          if (i > j) winProb += prob;
+          else if (i === j) drawProb += prob;
+          else lossProb += prob;
+        }
+      }
+      
+      // Calculate Recommended Squad (Top 10 players for this opponent)
+      const eligiblePlayers = players.filter(p => {
+        const isAtSeason = playerSeasons.some(ps => ps.playerId === p.id && ps.seasonId === match.seasonId);
+        const isInjured = injuries.some(i => i.playerId === p.id && !i.endDate);
+        return isAtSeason && !isInjured && p.isActive !== false;
+      });
+
+      const scoredPlayers = eligiblePlayers.map(p => {
+        // Use pre-calculated rating and breakdown
+        const ratingData = allPlayerRatings.find(pr => pr.id === p.id);
+        let compScore = ratingData?.rating || 0;
+        
+        // Goals bonus
+        const pStats = stats.filter(s => s.playerId === p.id && s.attendance === 'attending');
+        const totalGoals = pStats.reduce((acc, s) => acc + (s.goals || 0), 0);
+        compScore += totalGoals * 5;
+
+        // Regularity bonus (Attendance rate)
+        if (ratingData?.breakdown) {
+          const rate = ratingData.breakdown.partidosComputables > 0 
+            ? (ratingData.breakdown.partidosAsistidos / ratingData.breakdown.partidosComputables) 
+            : 0;
+          compScore += rate * 50;
+        }
+        
+        if (inFormPlayers.has(p.id)) compScore += 10;
+        
+        const pVsOppMatches = vsOppMatches.filter(m => 
+          stats.some(s => s.matchId === m.id && s.playerId === p.id && s.attendance === 'attending')
+        );
+        if (pVsOppMatches.length > 0) {
+          const pVsOppWins = pVsOppMatches.filter(m => (m.scoreTeam || 0) > (m.scoreOpponent || 0)).length;
+          compScore += (pVsOppWins / pVsOppMatches.length) * 15;
+        }
+        
+        return { player: p, compScore, position: p.position };
+      }).sort((a, b) => b.compScore - a.compScore);
+
+      let recommendedSquad: Player[] = [];
+      const distribution = {
+        'Portero': 1,
+        'Defensa': 3,
+        'Medio': 4,
+        'Delantero': 2
+      };
+
+      const selectedIds = new Set<string>();
+
+      // First pass: Select top players for each position according to distribution
+      Object.entries(distribution).forEach(([pos, count]) => {
+        const topInPos = scoredPlayers
+          .filter(sp => sp.position === pos)
+          .slice(0, count);
+        
+        topInPos.forEach(sp => {
+          recommendedSquad.push(sp.player);
+          selectedIds.add(sp.player.id);
+        });
+      });
+
+      // Second pass: If squad < 10, fill with remaining best players regardless of position
+      if (recommendedSquad.length < 10) {
+        const remaining = scoredPlayers
+          .filter(sp => !selectedIds.has(sp.player.id))
+          .slice(0, 10 - recommendedSquad.length);
+        
+        remaining.forEach(sp => {
+          recommendedSquad.push(sp.player);
+          selectedIds.add(sp.player.id);
+        });
+      }
+
+      // Sort final squad by position priority for better UI display
+      const posOrder: Record<string, number> = { 'Portero': 1, 'Defensa': 2, 'Medio': 3, 'Delantero': 4 };
+      recommendedSquad.sort((a, b) => (posOrder[a.position] || 99) - (posOrder[b.position] || 99));
+
+      if (recommendedSquad.length === 0 && scoredPlayers.length > 0) {
+        recommendedSquad = scoredPlayers.slice(0, 10).map(sp => sp.player);
+      }
+
+      // Calculate Ideal Win Rate with Recommended Squad
+      const recSquadRatings = allPlayerRatings
+        .filter(pr => recommendedSquad.some(rsp => rsp.id === pr.id))
+        .map(pr => pr.rating);
+      const recSquadAvgBaremo = recSquadRatings.length > 0
+        ? recSquadRatings.reduce((a, b) => a + b, 0) / recSquadRatings.length
+        : teamAvgBaremo;
+
+      const idealGF = predGF * (recSquadAvgBaremo / (currentAvgBaremo || 1));
+      const idealGC = predGC * (currentAvgBaremo / (recSquadAvgBaremo || 1));
+
+      let idealWinProb = 0;
+      let idealDrawProb = 0;
+      let idealLossProb = 0;
+
+      for (let i = 0; i <= 8; i++) {
+        for (let j = 0; j <= 8; j++) {
+          const prob = poisson(idealGF, i) * poisson(idealGC, j);
+          if (i > j) idealWinProb += prob;
+          else if (i === j) idealDrawProb += prob;
+          else idealLossProb += prob;
+        }
+      }
+
+      predictionMap.set(match.id, {
+        team: mostProbableScore.team,
+        opponent: mostProbableScore.opponent,
+        confidence,
+        reasons,
+        probabilities: { 
+          win: Math.round(winProb * 100), 
+          draw: Math.round(drawProb * 100), 
+          loss: Math.round(lossProb * 100) 
+        },
+        recommendedSquad,
+        recommendedProbabilities: {
+          win: Math.round(idealWinProb * 100),
+          draw: Math.round(idealDrawProb * 100),
+          loss: Math.round(idealLossProb * 100)
+        }
+      });
+    });
+    
+    return predictionMap;
+  }, [matches, stats, allPlayerRatings, scheduledMatches, totalGoals, totalGoalsAgainst, standings]);

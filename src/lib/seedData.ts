@@ -20,8 +20,8 @@ export const seedDatabase = async () => {
     const teamId = teamRef.id;
 
     // 2. Seasons
-    const season1Ref = await addDoc(collection(db, 'seasons'), { name: 'Temporada 2025/2026', teamId });
-    const season2Ref = await addDoc(collection(db, 'seasons'), { name: 'Temporada 2024/2025', teamId });
+    const season1Ref = await addDoc(collection(db, 'seasons'), { name: 'Temporada 2025/2026', startYear: 2025, teamId });
+    const season2Ref = await addDoc(collection(db, 'seasons'), { name: 'Temporada 2024/2025', startYear: 2024, teamId });
     const currentSeasonId = season1Ref.id;
 
     // 3. Opponents

@@ -13,7 +13,8 @@ import {
   Shield,
   ShieldAlert,
   ClipboardCheck,
-  DollarSign
+  DollarSign,
+  Brain
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -38,10 +39,11 @@ export default function Layout({ children, activeTab, setActiveTab, user, team, 
 
   const navItems = [
     { id: 'dashboard', label: 'Resumen', icon: LayoutDashboard },
-    { id: 'team', label: team?.name || 'Mi Equipo', icon: Shield },
+    { id: 'ai-analysis', label: 'Análisis IA', icon: Brain },
+    { id: 'standings', label: 'Clasificación', icon: Trophy },
     { id: 'players', label: 'Jugadores', icon: Users },
     { id: 'matches', label: 'Partidos', icon: Calendar },
-    { id: 'simulator', label: 'Simulador', icon: Trophy },
+    { id: 'simulator', label: 'Simulador', icon: ClipboardCheck },
     { id: 'treasury', label: 'Tesorería', icon: DollarSign },
     { id: 'settings', label: 'Configuraciones', icon: Settings },
   ];

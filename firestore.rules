@@ -77,6 +77,20 @@ service cloud.firestore {
              isValidString('startDate', 1, 100);
     }
 
+    function isValidStanding() {
+      return hasRequiredFields(['teamId', 'seasonId', 'opponentId', 'played', 'won', 'drawn', 'lost', 'goalsFor', 'goalsAgainst', 'points']) &&
+             isValidString('teamId', 1, 100) &&
+             isValidString('seasonId', 1, 100) &&
+             isValidString('opponentId', 1, 100) &&
+             isValidNumber('played', 0, 100) &&
+             isValidNumber('won', 0, 100) &&
+             isValidNumber('drawn', 0, 100) &&
+             isValidNumber('lost', 0, 100) &&
+             isValidNumber('goalsFor', 0, 999) &&
+             isValidNumber('goalsAgainst', 0, 999) &&
+             isValidNumber('points', 0, 300);
+    }
+
     // ===============================================================
     // Match Rules
     // ===============================================================
@@ -125,6 +139,12 @@ service cloud.firestore {
     match /lineups/{lineupId} {
       allow read: if isAuthenticated();
       allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    match /standings/{standingId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidStanding();
       allow delete: if isAuthenticated();
     }
   }

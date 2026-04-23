@@ -1,41 +1,53 @@
-import { Match, PlayerStat, Injury, Player } from '../types';
+import { Match, PlayerStat, Injury, Player, Season } from '../types';
 
 export interface PlayerRatingReport {
   partidosComputables: number;
   partidosLesionado: number;
   partidosJustificados: number;
   partidosAsistidos: number;
+  partidosNoAsistencia: number;
+  partidosSinRespuesta: number;
   partidosBajo4Goles: number;
   asistenciaEfectiva: number;
   rachaMaxima: number;
+  rachaMaximaAusencias: number;
   bonoRegularidad: number;
+  penalizacionRegularidad: number;
   notaCompromiso: number;
   notaDesempeno: number;
+  notaDesempenoPura: number;
+  factorFiabilidad: number;
+  porcentajeParticipacion: number;
   notaFinal: number;
+  puntosTotales: number;
+  mediaPorPartido: number;
 }
 
-const PESO_COMPROMISO = 0.55;
-const PESO_DESEMPENO = 0.45;
-const META_EXCELENCIA = 10.0;
-const BONO_REGULARIDAD_PUNTOS = 0.8;
-const BONO_REGULARIDAD_RACHA = 3;
-const PUNTOS_VICTORIA = 10;
-const PUNTOS_EMPATE = 5;
-const PUNTOS_DERROTA = 1.5;
-const PUNTOS_BAJO_4_GOLES = 4;
-const PUNTOS_GOL = 12.5;
-const PUNTOS_ASISTENCIA = 4;
-const PUNTOS_AMARILLA = -1;
-const PUNTOS_ROJA = -3;
-const PUNTOS_SIN_CONTESTAR = -2;
-const PUNTOS_NO_ASISTENCIA = -0.15;
+export const PESO_COMPROMISO = 0.55;
+export const PESO_DESEMPENO = 0.45;
+export const META_EXCELENCIA = 100;
+export const BONO_REGULARIDAD_PUNTOS = 8;
+export const BONO_REGULARIDAD_RACHA = 3;
+export const PENALIZACION_REGULARIDAD_PUNTOS = 8;
+export const PENALIZACION_REGULARIDAD_RACHA = 5;
+export const PUNTOS_VICTORIA = 120;
+export const PUNTOS_EMPATE = 50;
+export const PUNTOS_DERROTA = 15;
+export const PUNTOS_BAJO_4_GOLES = 40;
+export const PUNTOS_GOL = 80;
+export const PUNTOS_ASISTENCIA = 40;
+export const PUNTOS_AMARILLA = -20;
+export const PUNTOS_ROJA = -40;
+export const PUNTOS_SIN_CONTESTAR = -10;
+export const PUNTOS_NO_ASISTENCIA = -1.5;
 
 export function calculatePlayerRating(
   matches: Match[],
   injuries: Injury[],
   playerStats: PlayerStat[],
   player: Player,
-  seasonId?: string
+  seasonId?: string,
+  seasons?: Season[]
 ): PlayerRatingReport {
   const playerId = player.id;
   // Filtrar partidos por temporada si se proporciona
@@ -58,8 +70,25 @@ export function calculatePlayerRating(
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   const partidosTotales = sortedMatches.length;
 
-  // Obtener lesiones del jugador
-  const playerInjuries = injuries.filter(i => i.playerId === playerId);
+  // Obtener lesiones del jugador (filtradas por temporada si se proporciona)
+  let playerInjuries = injuries.filter(i => i.playerId === playerId);
+
+  if (seasonId && seasonId !== 'all') {
+    const season = seasons?.find(s => s.id === seasonId);
+    if (season && season.startYear) {
+      const startYear = season.startYear;
+      const seasonStart = new Date(startYear, 7, 1); 
+      const seasonEnd = new Date(startYear + 1, 6, 31);
+      
+      playerInjuries = playerInjuries.filter(i => {
+        if (i.seasonId === seasonId) return true;
+        const injuryDate = new Date(i.startDate);
+        return injuryDate >= seasonStart && injuryDate <= seasonEnd;
+      });
+    } else {
+      playerInjuries = playerInjuries.filter(i => i.seasonId === seasonId);
+    }
+  }
 
   let partidosLesionado = 0;
   let partidosJustificados = 0;
@@ -69,6 +98,10 @@ export function calculatePlayerRating(
   let noContestados = 0;
   let maxStreak = 0;
   let currentStreak = 0;
+  let maxAbsentStreak = 0;
+  let currentAbsentStreak = 0;
+  let hasStartedTenure = false;
+  let partidosComputablesCount = 0;
 
   sortedMatches.forEach(match => {
     const fechaPartido = new Date(match.date);
@@ -78,48 +111,61 @@ export function calculatePlayerRating(
       return fechaPartido >= start && (end === null || fechaPartido <= end);
     });
 
+    const stat = stats.find(s => s.matchId === match.id);
+    
+    // Si no ha empezado su "tenure" (no tiene stats registradas ni está lesionado en este partido),
+    // ignoramos este partido para el cálculo de su compromiso personal.
+    if (!hasStartedTenure && !stat && !estaLesionado) {
+      return;
+    }
+    
+    hasStartedTenure = true;
+    partidosComputablesCount++;
+
     if (estaLesionado) {
       partidosLesionado++;
+      currentAbsentStreak = 0; // La lesión rompe la racha de ausencias
+      // Estar lesionado no rompe la racha de regularidad, la mantiene
     } else {
-      const stat = stats.find(s => s.matchId === match.id);
       const attendance = stat?.attendance || 'noResponse';
       
       if (attendance === 'attending') {
         partidosAsistidos++;
         currentStreak++;
+        currentAbsentStreak = 0;
         if (currentStreak > maxStreak) maxStreak = currentStreak;
-      } else if (attendance === 'justified') {
-        partidosJustificados++;
-        // Justified doesn't break the streak, but doesn't increment it either
-        // unless the user wants it to count as "regularity".
-        // Given "no puede ser regular por motivos justificados", 
-        // let's make it NOT break the streak.
-      } else if (attendance === 'notAttending') {
-        noAsistencias++;
-        currentStreak = 0;
       } else {
+        // Cualquier falta de asistencia (justificada, no asistencia, sin respuesta, duda) corta la racha positiva
+        // y aumenta la racha negativa
         currentStreak = 0;
-        // Si no hay registro o es 'noResponse', se considera no contestado
-        if (attendance === 'noResponse') {
+        currentAbsentStreak++;
+        if (currentAbsentStreak > maxAbsentStreak) maxAbsentStreak = currentAbsentStreak;
+        
+        if (attendance === 'notAttending' || attendance === 'doubtful') {
+          noAsistencias++;
+        } else if (attendance === 'justified') {
+          partidosJustificados++;
+        } else if (attendance === 'noResponse') {
           noContestados++;
         }
       }
     }
   });
 
-  const partidosComputables = partidosTotales;
+  const partidosComputables = partidosComputablesCount;
   const bonoRegularidad = Math.floor(maxStreak / BONO_REGULARIDAD_RACHA) * BONO_REGULARIDAD_PUNTOS;
+  const penalizacionRegularidad = Math.floor(maxAbsentStreak / PENALIZACION_REGULARIDAD_RACHA) * PENALIZACION_REGULARIDAD_PUNTOS;
 
   // 4. Calcular Nota de Compromiso
-  let notaCompromiso = 10;
+  let notaCompromiso = 100;
   let asistenciaEfectiva = 0;
   if (partidosComputables > 0) {
     const penalizacionNoContestar = noContestados * PUNTOS_SIN_CONTESTAR;
     const penalizacionNoAsistencia = noAsistencias * PUNTOS_NO_ASISTENCIA;
-    // Las lesiones cuentan como un 75% de asistencia (penalización reducida un 75%)
+    // Las lesiones cuentan como un 80% de asistencia (pequeña penalización frente a los que juegan)
     // Las ausencias justificadas cuentan como un 100% de asistencia (sin penalización)
-    asistenciaEfectiva = partidosAsistidos + (partidosLesionado * 0.50) + (partidosJustificados * 1.0);
-    notaCompromiso = Math.max(0, Math.min(10, ((asistenciaEfectiva / partidosComputables) * 10) + penalizacionNoContestar + penalizacionNoAsistencia));
+    asistenciaEfectiva = partidosAsistidos + (partidosLesionado * 0.8) + partidosJustificados;
+    notaCompromiso = Math.max(0, Math.min(100, Math.round(((asistenciaEfectiva / partidosComputables) * 100) + penalizacionNoContestar + penalizacionNoAsistencia)));
   }
 
   // 5. Calcular Media de Desempeño
@@ -135,8 +181,8 @@ export function calculatePlayerRating(
         else if (teamScore === opponentScore) puntosTotales += PUNTOS_EMPATE; // Empate
         else puntosTotales += PUNTOS_DERROTA; // Derrota
 
-        // Plus para porteros: Menos de 4 goles recibidos
-        if (player.position === 'Portero' && opponentScore < 4) {
+        // Plus para porteros y defensas: Menos de 4 goles recibidos
+        if ((player.position === 'Portero' || player.position === 'Defensa') && opponentScore < 4) {
           puntosTotales += PUNTOS_BAJO_4_GOLES;
           partidosBajo4Goles++;
         }
@@ -151,23 +197,41 @@ export function calculatePlayerRating(
 
   const mediaPorPartido = partidosAsistidos > 0 ? puntosTotales / partidosAsistidos : 0;
 
-  // 6. Calcular Nota de Desempeño
-  const notaDesempeno = Math.max(0, Math.min(10, (mediaPorPartido / META_EXCELENCIA) * 10));
+  // 6. Calcular Nota de Desempeño Pura
+  const notaDesempenoPura = Math.max(0, Math.min(100, Math.round((mediaPorPartido / META_EXCELENCIA) * 100)));
+
+  // --- Factor de Participación (%) ---
+  // Adecúa la nota de desempeño en base al porcentaje de asistencia sobre el total de partidos del equipo.
+  // Evita que pocos partidos copen el podio, escalando la pureza de la nota del 60% al 100%.
+  const porcentajeParticipacion = partidosTotales > 0 ? (partidosAsistidos / partidosTotales) : 1;
+  const factorFiabilidad = 0.6 + (0.4 * porcentajeParticipacion); // Suaviza la nota sin masacrarla
+
+  const notaDesempeno = Math.round(notaDesempenoPura * factorFiabilidad);
 
   // 7. Calcular Nota Final
-  const notaFinal = Math.min(10, (notaCompromiso * PESO_COMPROMISO) + (notaDesempeno * PESO_DESEMPENO) + bonoRegularidad);
+  const notaPreliminar = (notaCompromiso * PESO_COMPROMISO) + (notaDesempeno * PESO_DESEMPENO) + bonoRegularidad - penalizacionRegularidad;
+  const notaFinal = Math.max(0, Math.min(100, Math.round(notaPreliminar)));
 
   return {
     partidosComputables,
     partidosLesionado,
     partidosJustificados,
     partidosAsistidos,
+    partidosNoAsistencia: noAsistencias,
+    partidosSinRespuesta: noContestados,
     partidosBajo4Goles,
-    asistenciaEfectiva: parseFloat(asistenciaEfectiva.toFixed(2)),
+    asistenciaEfectiva: Math.round(asistenciaEfectiva),
     rachaMaxima: maxStreak,
-    bonoRegularidad: parseFloat(bonoRegularidad.toFixed(2)),
-    notaCompromiso: parseFloat(notaCompromiso.toFixed(2)),
-    notaDesempeno: parseFloat(notaDesempeno.toFixed(2)),
-    notaFinal: parseFloat(notaFinal.toFixed(2))
+    rachaMaximaAusencias: maxAbsentStreak,
+    bonoRegularidad: Math.round(bonoRegularidad),
+    penalizacionRegularidad: Math.round(penalizacionRegularidad),
+    notaCompromiso: Math.round(notaCompromiso),
+    notaDesempeno: Math.round(notaDesempeno),
+    notaDesempenoPura: Math.round(notaDesempenoPura),
+    factorFiabilidad: parseFloat(factorFiabilidad.toFixed(2)),
+    porcentajeParticipacion: Math.round(porcentajeParticipacion * 100),
+    notaFinal: Math.round(notaFinal),
+    puntosTotales: Math.round(puntosTotales),
+    mediaPorPartido: Math.round(mediaPorPartido)
   };
 }

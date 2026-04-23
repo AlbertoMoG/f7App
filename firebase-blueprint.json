@@ -89,6 +89,24 @@
         "cause": { "type": "string" }
       },
       "required": ["playerId", "teamId", "startDate"]
+    },
+    "StandingsEntry": {
+      "title": "Standings Entry",
+      "description": "Entry in the league classification for a team or opponent",
+      "type": "object",
+      "properties": {
+        "teamId": { "type": "string" },
+        "seasonId": { "type": "string" },
+        "opponentId": { "type": "string" },
+        "played": { "type": "number" },
+        "won": { "type": "number" },
+        "drawn": { "type": "number" },
+        "lost": { "type": "number" },
+        "goalsFor": { "type": "number" },
+        "goalsAgainst": { "type": "number" },
+        "points": { "type": "number" }
+      },
+      "required": ["teamId", "seasonId", "opponentId", "played", "won", "drawn", "lost", "goalsFor", "goalsAgainst", "points"]
     }
   },
   "firestore": {
@@ -98,6 +116,7 @@
     "/matches/{matchId}": { "schema": "Match", "description": "Collection of matches" },
     "/playerStats/{statId}": { "schema": "PlayerStat", "description": "Collection of player statistics per match" },
     "/lineups/{lineupId}": { "schema": "Lineup", "description": "Collection of saved lineups" },
-    "/injuries/{injuryId}": { "schema": "Injury", "description": "Collection of player injury history" }
+    "/injuries/{injuryId}": { "schema": "Injury", "description": "Collection of player injury history" },
+    "/standings/{standingId}": { "schema": "StandingsEntry", "description": "Collection of league standings" }
   }
 }

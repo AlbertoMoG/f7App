@@ -11,14 +11,14 @@ const SelectGroup = SelectPrimitive.Group
 // Hemos simplificado SelectValue para que sea 100% controlable por ti
 const SelectValue = React.forwardRef<
   HTMLSpanElement,
-  React.HTMLAttributes<HTMLSpanElement>
->(({ className, children, ...props }, ref) => (
+  React.HTMLAttributes<HTMLSpanElement> & { placeholder?: string }
+>(({ className, children, placeholder, ...props }, ref) => (
   <span
     ref={ref}
     className={cn("block truncate text-left w-full", className)}
     {...props}
   >
-    {children}
+    <SelectPrimitive.Value placeholder={placeholder}>{children}</SelectPrimitive.Value>
   </span>
 ))
 SelectValue.displayName = "SelectValue"

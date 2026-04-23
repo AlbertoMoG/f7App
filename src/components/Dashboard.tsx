@@ -15,12 +15,29 @@ import {
   Trash2,
   ExternalLink,
   Bandage,
-  Check
+  Check,
+  Cake,
+  Lightbulb,
+  Home,
+  Navigation,
+  Sparkles,
+  Info,
+  ChevronRight,
+  Brain
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import {
   XAxis,
   YAxis,
@@ -42,13 +59,14 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { motion } from 'motion/react';
-import { Player, Match, PlayerStat, Opponent, Season, Field, PlayerSeason, Injury } from '../types';
+import { Player, Match, PlayerStat, Opponent, Season, Field, PlayerSeason, Injury, Position, StandingsEntry } from '../types';
 import { cn } from '@/lib/utils';
 import { seedDatabase } from '../lib/seedData';
 import { cleanupDatabase } from '../lib/cleanup';
 import { toast } from 'sonner';
 import { calculatePlayerRating } from '../lib/ratingSystem';
 import { LazyTopPlayersCard } from './LazyTopPlayersCard';
+import AttendanceChart from './AttendanceChart';
 
 interface DashboardProps {
   players: Player[];
@@ -60,12 +78,25 @@ interface DashboardProps {
   fields: Field[];
   injuries: Injury[];
   globalSeasonId: string;
+  standings?: StandingsEntry[];
 }
 
-export default function Dashboard({ players, playerSeasons, matches, stats, opponents, seasons, fields, injuries, globalSeasonId }: DashboardProps) {
+export default function Dashboard({ 
+  players, 
+  playerSeasons, 
+  matches, 
+  stats, 
+  opponents, 
+  seasons, 
+  fields, 
+  injuries, 
+  globalSeasonId,
+  standings = []
+}: DashboardProps) {
   const [isSeeding, setIsSeeding] = React.useState(false);
   const [isCleaning, setIsCleaning] = React.useState(false);
   const [selectedType, setSelectedType] = React.useState<string>('all');
+  const [recommendedMatchId, setRecommendedMatchId] = React.useState<string | null>(null);
 
   const handleSeed = async () => {
     setIsSeeding(true);
@@ -206,12 +237,18 @@ export default function Dashboard({ players, playerSeasons, matches, stats, oppo
   }, [opponents, completedMatches]);
 
   // 5. Cálculo de Baremo (Nota Final)
-  const playerBaremo = React.useMemo(() => {
+  const allPlayerRatings = React.useMemo(() => {
     return filteredPlayers.map(p => {
-      const rating = calculatePlayerRating(matches, injuries, stats, p, globalSeasonId);
-      return { ...p, rating: parseFloat(rating.notaFinal.toFixed(2)) };
-    }).sort((a, b) => b.rating - a.rating).slice(0, 8);
-  }, [filteredPlayers, matches, injuries, stats, globalSeasonId]);
+      const breakdown = calculatePlayerRating(matches, injuries, stats, p, globalSeasonId, seasons);
+      return { 
+        ...p, 
+        rating: breakdown.notaFinal,
+        breakdown // Keep full breakdown for deeper analysis
+      };
+    }).sort((a, b) => b.rating - a.rating);
+  }, [filteredPlayers, matches, injuries, stats, globalSeasonId, seasons]);
+
+  const playerBaremo = React.useMemo(() => allPlayerRatings.slice(0, 8), [allPlayerRatings]);
 
   // Memoized calculate functions for LazyTopPlayersCard
   const calculateBaremo = React.useCallback(() => playerBaremo, [playerBaremo]);
@@ -220,12 +257,12 @@ export default function Dashboard({ players, playerSeasons, matches, stats, oppo
   const calculateMaxStreak = React.useCallback(() => {
     return filteredPlayers
       .map(p => {
-        const rating = calculatePlayerRating(matches, injuries, stats, p, globalSeasonId);
+        const rating = calculatePlayerRating(matches, injuries, stats, p, globalSeasonId, seasons);
         return { ...p, racha: rating.rachaMaxima };
       })
       .sort((a, b) => b.racha - a.racha)
       .slice(0, 8);
-  }, [filteredPlayers, matches, injuries, stats, globalSeasonId]);
+  }, [filteredPlayers, matches, injuries, stats, globalSeasonId, seasons]);
 
   const calculateMatchesPlayed = React.useCallback(() => {
     return filteredPlayers
@@ -256,6 +293,88 @@ export default function Dashboard({ players, playerSeasons, matches, stats, oppo
     }).length;
   }, [injuries]);
 
+  // Age Calculations Utils
+  const calculateAge = React.useCallback((birthDate: string) => {
+    if (!birthDate) return 0;
+    const today = new Date();
+    const birth = new Date(birthDate);
+    let age = today.getFullYear() - birth.getFullYear();
+    const month = today.getMonth() - birth.getMonth();
+    if (month < 0 || (month === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    return age;
+  }, []);
+
+  const ageStats = React.useMemo(() => {
+    if (filteredPlayers.length === 0) return null;
+
+    const ages = filteredPlayers.map(p => calculateAge(p.birthDate)).filter(age => age > 0);
+    if (ages.length === 0) return null;
+
+    const averageAge = ages.reduce((a, b) => a + b, 0) / ages.length;
+
+    const positions: Position[] = ['Portero', 'Defensa', 'Medio', 'Delantero'];
+    const avgAgeByPosition = positions.map(pos => {
+      const posAges = filteredPlayers
+        .filter(p => p.position === pos)
+        .map(p => calculateAge(p.birthDate))
+        .filter(age => age > 0);
+      return {
+        position: pos,
+        avgAge: posAges.length > 0 ? posAges.reduce((a, b) => a + b, 0) / posAges.length : 0
+      };
+    });
+
+    const sortedByAge = [...filteredPlayers].sort((a, b) => {
+      return new Date(a.birthDate).getTime() - new Date(b.birthDate).getTime();
+    });
+
+    // Upcoming Birthdays (next 30 days)
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentDate = today.getDate();
+
+    const upcomingBirthdays = filteredPlayers.map(p => {
+      const birth = new Date(p.birthDate);
+      const bMonth = birth.getMonth();
+      const bDay = birth.getDate();
+      
+      // Calculate next occurrence
+      let nextOccur = new Date(today.getFullYear(), bMonth, bDay);
+      if (nextOccur < today) {
+        nextOccur.setFullYear(today.getFullYear() + 1);
+      }
+      
+      const diffTime = nextOccur.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      return { 
+        ...p, 
+        daysUntil: diffDays,
+        isBirthdayToday: bMonth === currentMonth && bDay === currentDate,
+        isBirthdayThisMonth: bMonth === currentMonth
+      };
+    }).filter(p => p.daysUntil <= 30 || p.isBirthdayToday)
+      .sort((a, b) => a.daysUntil - b.daysUntil)
+      .slice(0, 5);
+
+    return {
+      averageAge: parseFloat(averageAge.toFixed(1)),
+      avgAgeByPosition,
+      oldest: sortedByAge[0],
+      youngest: sortedByAge[sortedByAge.length - 1],
+      upcomingBirthdays,
+      distribution: [
+        { name: '< 20', value: ages.filter(a => a < 20).length },
+        { name: '20-25', value: ages.filter(a => a >= 20 && a <= 25).length },
+        { name: '26-30', value: ages.filter(a => a > 25 && a <= 30).length },
+        { name: '31-35', value: ages.filter(a => a > 30 && a <= 35).length },
+        { name: '36+', value: ages.filter(a => a > 35).length },
+      ].filter(d => d.value > 0)
+    };
+  }, [filteredPlayers, calculateAge]);
+
   const stats_cards = [
     { title: 'Victorias', value: wins, icon: Trophy, color: 'text-emerald-600', bg: 'bg-emerald-50' },
     { title: 'Empates', value: draws, icon: Activity, color: 'text-gray-600', bg: 'bg-gray-50' },
@@ -284,6 +403,8 @@ export default function Dashboard({ players, playerSeasons, matches, stats, oppo
     { name: 'A Favor', value: totalGoals, fill: '#3B82F6' },
     { name: 'En Contra', value: totalGoalsAgainst, fill: '#F97316' },
   ].filter(d => d.value > 0);
+
+  // 10. Predicción de Resultados (Análisis de Historial, Calidad de Convocatoria, Racha, Clasificación y Factores Contextuales)
 
   return (
     <div className="space-y-4">
@@ -367,6 +488,14 @@ export default function Dashboard({ players, playerSeasons, matches, stats, oppo
           </motion.div>
         ))}
       </div>
+      
+      {/* Attendance Chart */}
+      <AttendanceChart 
+        matches={filteredMatches} 
+        stats={filteredStats} 
+        seasons={seasons}
+        globalSeasonId={globalSeasonId}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Win Rate Pie Chart */}
@@ -441,6 +570,161 @@ export default function Dashboard({ players, playerSeasons, matches, stats, oppo
           </CardContent>
         </Card>
       </div>
+
+      {/* Age Statistics Section */}
+      {ageStats && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-4">
+          {/* Age Distribution Pie Chart */}
+          <Card className="border border-gray-100 shadow-sm lg:col-span-1">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Users className="text-emerald-600" size={18} />
+                Distribución por Edad
+              </CardTitle>
+              <CardDescription>Segmentación de la plantilla por rangos.</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[220px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={ageStats.distribution}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={45}
+                    outerRadius={65}
+                    paddingAngle={5}
+                    dataKey="value"
+                  >
+                    {ageStats.distribution.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'][index % 5]} />
+                    ))}
+                    <LabelList 
+                      dataKey="name" 
+                      position="outside" 
+                      style={{ fontSize: '10px', fill: '#6B7280', fontWeight: 'bold' }} 
+                    />
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: '12px' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Average Age by Position Bar Chart */}
+          <Card className="border border-gray-100 shadow-sm lg:col-span-1">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <TrendingUp className="text-blue-600" size={18} />
+                Edad Media por Posición
+              </CardTitle>
+              <CardDescription>Comparativa de veteranía por líneas.</CardDescription>
+            </CardHeader>
+            <CardContent className="h-[220px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={ageStats.avgAgeByPosition} layout="vertical" margin={{ left: 10, right: 30, top: 10, bottom: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f3f4f6" />
+                  <XAxis type="number" hide />
+                  <YAxis 
+                    dataKey="position" 
+                    type="category" 
+                    width={80} 
+                    axisLine={false} 
+                    tickLine={false} 
+                    style={{ fontSize: '11px', fontWeight: 'bold', fill: '#4B5563' }}
+                  />
+                  <Tooltip 
+                    cursor={{ fill: 'rgba(59, 130, 246, 0.05)' }}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: '12px' }}
+                    formatter={(value: number) => [`${value.toFixed(1)} años`, 'Edad Media']}
+                  />
+                  <Bar dataKey="avgAge" radius={[0, 10, 10, 0]} barSize={24}>
+                    {ageStats.avgAgeByPosition.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={['#FACC15', '#3B82F6', '#10B981', '#EF4444'][index % 4]} />
+                    ))}
+                    <LabelList 
+                      dataKey="avgAge" 
+                      position="right" 
+                      formatter={(v: number) => v > 0 ? `${v.toFixed(1)}` : ''} 
+                      style={{ fontSize: '10px', fontWeight: 'black', fill: '#374151' }} 
+                    />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+
+          {/* Key Age Metrics */}
+          <Card className="border border-gray-100 shadow-sm lg:col-span-1 bg-gradient-to-br from-white to-gray-50/50">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Target className="text-orange-500" size={18} />
+                Hitos de Edad
+              </CardTitle>
+              <CardDescription>Datos clave sobre la madurez del equipo.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-2">
+              <div className="flex flex-col items-center justify-center py-2 bg-white rounded-2xl border border-gray-100 shadow-sm relative overflow-hidden group">
+                <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                  <Activity size={40} className="text-emerald-600" />
+                </div>
+                <span className="text-[10px] uppercase font-black text-gray-400">Media del Equipo</span>
+                <span className="text-4xl font-black text-emerald-600 leading-none mt-1">{ageStats.averageAge}</span>
+                <span className="text-[10px] font-bold text-gray-400 mt-1 uppercase">años</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-blue-100 transition-colors">
+                  <p className="text-[9px] uppercase font-bold text-gray-400 mb-1">Más Veterano</p>
+                  <p className="font-black text-gray-900 truncate">{ageStats.oldest.alias || ageStats.oldest.firstName}</p>
+                  <p className="text-xs font-bold text-blue-600">{calculateAge(ageStats.oldest.birthDate)} años</p>
+                </div>
+                <div className="p-3 bg-white rounded-xl border border-gray-100 shadow-sm hover:border-emerald-100 transition-colors">
+                  <p className="text-[9px] uppercase font-bold text-gray-400 mb-1">Más Joven</p>
+                  <p className="font-black text-gray-900 truncate">{ageStats.youngest.alias || ageStats.youngest.firstName}</p>
+                  <p className="text-xs font-bold text-emerald-600">{calculateAge(ageStats.youngest.birthDate)} años</p>
+                </div>
+              </div>
+
+              {ageStats.upcomingBirthdays.length > 0 && (
+                <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                  <div className="flex items-center gap-2 mb-2 pb-1 border-b border-gray-50">
+                    <Cake size={14} className="text-pink-500" />
+                    <span className="text-[10px] uppercase font-black text-gray-400">Próximos Cumples</span>
+                  </div>
+                  <div className="space-y-2">
+                    {ageStats.upcomingBirthdays.map(p => (
+                      <div key={p.id} className="flex items-center justify-between group/bday">
+                        <div className="flex items-center gap-2 max-w-[70%]">
+                          <div className={cn(
+                            "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
+                            p.isBirthdayToday ? "bg-pink-100 text-pink-600 animate-pulse" : "bg-gray-100 text-gray-500"
+                          )}>
+                            {p.isBirthdayToday ? "🎂" : (p.alias || p.firstName).charAt(0)}
+                          </div>
+                          <span className={cn("text-[11px] font-bold truncate", p.isBirthdayToday ? "text-pink-600" : "text-gray-700")}>
+                            {p.alias || p.firstName}
+                          </span>
+                        </div>
+                        <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full", 
+                          p.isBirthdayToday ? "bg-pink-50 text-pink-600" : "text-gray-400")}>
+                          {p.isBirthdayToday ? "¡HOY!" : `en ${p.daysUntil}d`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 text-[10px] text-emerald-700 bg-emerald-50/50 p-2 rounded-lg leading-relaxed font-medium">
+                <Lightbulb size={12} className="text-emerald-500 shrink-0" />
+                <p>Equipos con media 27-29 suelen combinar el pico físico con la madurez mental óptima.</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Top Players Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-8">
@@ -600,84 +884,6 @@ export default function Dashboard({ players, playerSeasons, matches, stats, oppo
         />
       </div>
 
-      {/* Upcoming Matches */}
-      <Card className="border-none shadow-sm rounded-2xl">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Clock className="text-emerald-600" size={20} />
-            Próximos Partidos
-          </CardTitle>
-          <CardDescription>Partidos programados próximamente.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {scheduledMatches.length === 0 ? (
-              <p className="col-span-full text-center py-8 text-gray-400 italic text-sm">No hay partidos programados.</p>
-            ) : (
-              scheduledMatches.slice(0, 6).map(match => {
-                const opponent = opponents.find(o => o.id === match.opponentId);
-                const season = seasons.find(s => s.id === match.seasonId);
-                return (
-                  <div key={match.id} className="flex flex-col p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-all">
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="w-20 h-20 bg-gray-50 rounded-xl shadow-inner flex items-center justify-center overflow-hidden border border-gray-100 shrink-0">
-                        {opponent?.shieldUrl ? (
-                          <img src={opponent.shieldUrl} alt={opponent.name} className="w-full h-full object-contain p-3" referrerPolicy="no-referrer" />
-                        ) : (
-                          <Shield size={40} className="text-gray-300" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-black text-lg text-gray-900 truncate">{opponent?.name || 'Rival desconocido'}</p>
-                        <p className="text-xs font-bold text-emerald-600 uppercase mt-1">
-                          {season?.name || 'Sin temporada'}
-                          {season?.division && <span className="text-gray-400 ml-1">• {season.division}</span>}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="space-y-2 text-sm text-gray-600">
-                      <div className="flex items-center gap-2">
-                        <Calendar size={16} className="text-gray-400" />
-                        <span>{format(new Date(match.date), "d 'de' MMMM, HH:mm", { locale: es })}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Target size={16} className="text-gray-400" />
-                        <span className="truncate flex items-center">
-                          {match.fieldId ? (
-                            (() => {
-                              const field = fields.find(f => f.id === match.fieldId);
-                              return field?.location ? (
-                                <a 
-                                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(field.location)}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md hover:bg-emerald-100 transition-colors font-bold border border-emerald-100 text-xs"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <span className="truncate">{field.name}</span>
-                                  <ExternalLink size={10} className="shrink-0" />
-                                </a>
-                              ) : (
-                                <span className="font-bold text-gray-700 truncate">{field?.name || 'Campo desconocido'}</span>
-                              );
-                            })()
-                          ) : (
-                            <span className="text-gray-500 truncate">{match.location || 'Campo por confirmar'}</span>
-                          )}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Activity size={16} className="text-gray-400" />
-                        <span className="capitalize">{match.type} {match.round ? `- Jornada ${match.round}` : ''}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

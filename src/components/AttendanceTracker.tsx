@@ -4,6 +4,7 @@ import {
   XCircle, 
   HelpCircle, 
   ShieldCheck,
+  AlertCircle,
   Users, 
   Calendar,
   Search,
@@ -39,7 +40,9 @@ import {
 import { Player, Match, PlayerStat, Season, Opponent, PlayerSeason } from '../types';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import PlayerCumulativeAttendanceChart from './PlayerCumulativeAttendanceChart';
 
 interface AttendanceTrackerProps {
   players: Player[];
@@ -62,11 +65,13 @@ export default function AttendanceTracker({
   globalSeasonId,
   onUpdateAttendance
 }: AttendanceTrackerProps) {
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState<string>('all');
   const [selectedPlayer, setSelectedPlayer] = React.useState<Player | null>(null);
   const [editingAttendance, setEditingAttendance] = React.useState<{playerId: string, matchId: string, status: string} | null>(null);
   const [isUpdating, setIsUpdating] = React.useState(false);
+  const [playerDetailView, setPlayerDetailView] = React.useState<'summary' | 'regularity'>('summary');
 
   // Filtrar partidos por temporada y tipo
   const seasonMatches = React.useMemo(() => {
@@ -74,8 +79,7 @@ export default function AttendanceTracker({
       .filter(m => {
         const seasonMatch = globalSeasonId === 'all' || m.seasonId === globalSeasonId;
         const typeMatch = typeFilter === 'all' || m.type === typeFilter;
-        const isCompleted = m.status === 'completed';
-        return seasonMatch && typeMatch && isCompleted;
+        return seasonMatch && typeMatch;
       })
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [matches, globalSeasonId, typeFilter]);
@@ -132,6 +136,8 @@ export default function AttendanceTracker({
         return <XCircle className="text-red-500" size={16} />;
       case 'justified':
         return <ShieldCheck className="text-blue-500" size={16} />;
+      case 'doubtful':
+        return <AlertCircle className="text-amber-500" size={16} />;
       case 'noResponse':
       default:
         return <HelpCircle className="text-gray-300" size={16} />;
@@ -143,20 +149,24 @@ export default function AttendanceTracker({
       case 'attending': return 'Asistió';
       case 'notAttending': return 'No asistió';
       case 'justified': return 'Justificado';
+      case 'doubtful': return 'Duda';
       case 'noResponse': return 'Sin respuesta';
       default: return 'Desconocido';
     }
   };
 
   const getPlayerStats = (playerId: string) => {
-    const playerStats = seasonMatches.map(m => getAttendanceStatus(playerId, m.id));
-    const attending = playerStats.filter(s => s === 'attending').length;
-    const notAttending = playerStats.filter(s => s === 'notAttending').length;
-    const justified = playerStats.filter(s => s === 'justified').length;
-    const noResponse = playerStats.filter(s => s === 'noResponse').length;
+    const playerStatsObj = seasonMatches.map(m => stats.find(s => s.playerId === playerId && s.matchId === m.id));
+    const attending = playerStatsObj.filter(s => s?.attendance === 'attending').length;
+    const notAttending = playerStatsObj.filter(s => s?.attendance === 'notAttending').length;
+    const justified = playerStatsObj.filter(s => s?.attendance === 'justified').length;
+    const doubtful = playerStatsObj.filter(s => s?.attendance === 'doubtful').length;
+    const historicalDoubtful = playerStatsObj.filter(s => s?.wasDoubtful || s?.attendance === 'doubtful').length;
+    
+    const noResponse = seasonMatches.length - (attending + notAttending + justified + doubtful);
     const total = seasonMatches.length;
 
-    return { attending, notAttending, justified, noResponse, total };
+    return { attending, notAttending, justified, doubtful, historicalDoubtful, noResponse, total };
   };
 
   const handleUpdateStatus = async (status: string) => {
@@ -179,6 +189,7 @@ export default function AttendanceTracker({
       { name: 'Asistió', value: s.attending, color: '#10b981' },
       { name: 'Justificado', value: s.justified, color: '#3b82f6' },
       { name: 'No asistió', value: s.notAttending, color: '#ef4444' },
+      { name: 'Duda', value: s.doubtful, color: '#f59e0b' },
       { name: 'Sin respuesta', value: s.noResponse, color: '#d1d5db' },
     ].filter(d => d.value > 0);
   })() : [];
@@ -222,12 +233,15 @@ export default function AttendanceTracker({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex items-center gap-4 text-xs font-bold text-gray-400 uppercase tracking-widest bg-gray-50 px-4 py-2 rounded-xl">
+              <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-gray-400 uppercase tracking-widest bg-gray-50 px-4 py-2 rounded-xl">
                 <div className="flex items-center gap-1.5">
                   <CheckCircle2 className="text-emerald-500" size={14} /> Asistió
                 </div>
                 <div className="flex items-center gap-1.5">
                   <ShieldCheck className="text-blue-500" size={14} /> Justificado
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <AlertCircle className="text-amber-500" size={14} /> Duda
                 </div>
                 <div className="flex items-center gap-1.5">
                   <XCircle className="text-red-500" size={14} /> No Asistió
@@ -352,25 +366,45 @@ export default function AttendanceTracker({
                                   </Tooltip>
                                 </td>
                                 {seasonMatches.map(match => {
-                                const status = getAttendanceStatus(player.id, match.id);
-                                return (
-                                  <td key={`${player.id}-${match.id}`} className="p-2 text-center border-r border-gray-50 last:border-r-0">
-                                    <Tooltip>
-                                      <TooltipTrigger render={
-                                        <div 
-                                          className="inline-flex items-center justify-center w-8 h-8 rounded-xl hover:bg-gray-100 transition-all cursor-pointer active:scale-95"
-                                          onClick={() => setEditingAttendance({ playerId: player.id, matchId: match.id, status })}
-                                        >
-                                          {renderStatusIcon(status)}
-                                        </div>
-                                      } />
-                                      <TooltipContent className="text-[10px] font-bold">
-                                        {getStatusLabel(status)} (Click para cambiar)
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </td>
-                                );
-                              })}
+                                  const status = getAttendanceStatus(player.id, match.id);
+                                  return (
+                                    <td 
+                                      key={`${player.id}-${match.id}`} 
+                                      className={cn(
+                                        "p-2 text-center border-r border-gray-50 last:border-r-0 transition-colors",
+                                        status === 'attending' ? "bg-emerald-50/30" :
+                                        status === 'notAttending' ? "bg-red-50/30" :
+                                        status === 'justified' ? "bg-blue-50/30" :
+                                        status === 'doubtful' ? "bg-amber-50/30" :
+                                        "bg-transparent"
+                                      )}
+                                    >
+                                      <Tooltip>
+                                        <TooltipTrigger onClick={() => setEditingAttendance({ playerId: player.id, matchId: match.id, status })}>
+                                          <div 
+                                            className={cn(
+                                              "inline-flex items-center justify-center w-8 h-8 rounded-xl transition-all cursor-pointer active:scale-95 shadow-sm border border-transparent",
+                                              status === 'attending' ? "bg-emerald-100 border-emerald-200" :
+                                              status === 'notAttending' ? "bg-red-100 border-red-200" :
+                                              status === 'justified' ? "bg-blue-100 border-blue-200" :
+                                              status === 'doubtful' ? "bg-amber-100 border-amber-200" :
+                                              "bg-gray-50 border-gray-100 hover:bg-gray-100"
+                                            )}
+                                          >
+                                            {renderStatusIcon(status)}
+                                          </div>
+                                        </TooltipTrigger>
+                                        <TooltipContent className="text-[10px] font-bold p-2 bg-gray-900 text-white rounded-lg border-none shadow-xl">
+                                          <div className="flex flex-col gap-1">
+                                            <p>{player.alias || player.firstName} - {format(new Date(match.date), 'dd/MM')}</p>
+                                            <p className="text-emerald-400">{getStatusLabel(status)}</p>
+                                            <p className="text-gray-400 text-[8px] italic">Click para cambiar</p>
+                                          </div>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </td>
+                                  );
+                                })}
                             </tr>
                           );
                         })}
@@ -408,52 +442,100 @@ export default function AttendanceTracker({
               </div>
             </DialogHeader>
             <div className="p-6 space-y-6">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-emerald-50 p-3 rounded-2xl text-center">
-                  <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">Asistió</p>
-                  <p className="text-xl font-black text-emerald-700">{selectedPlayer && getPlayerStats(selectedPlayer.id).attending}</p>
-                </div>
-                <div className="bg-blue-50 p-3 rounded-2xl text-center">
-                  <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">Justif.</p>
-                  <p className="text-xl font-black text-blue-700">{selectedPlayer && getPlayerStats(selectedPlayer.id).justified}</p>
-                </div>
-                <div className="bg-red-50 p-3 rounded-2xl text-center">
-                  <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mb-1">No Asistió</p>
-                  <p className="text-xl font-black text-red-700">{selectedPlayer && getPlayerStats(selectedPlayer.id).notAttending}</p>
-                </div>
-                <div className="bg-gray-50 p-3 rounded-2xl text-center">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Sin Resp.</p>
-                  <p className="text-xl font-black text-gray-600">{selectedPlayer && getPlayerStats(selectedPlayer.id).noResponse}</p>
-                </div>
+              <div className="flex bg-gray-100 p-1 rounded-2xl w-full">
+                <button
+                  onClick={() => setPlayerDetailView('summary')}
+                  className={cn(
+                    "flex-1 py-2 px-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+                    playerDetailView === 'summary' ? "bg-white text-gray-900 shadow-sm" : "text-gray-400 hover:text-gray-600"
+                  )}
+                >
+                  Resumen
+                </button>
+                <button
+                  onClick={() => setPlayerDetailView('regularity')}
+                  className={cn(
+                    "flex-1 py-2 px-4 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+                    playerDetailView === 'regularity' ? "bg-white text-gray-900 shadow-sm" : "text-gray-400 hover:text-gray-600"
+                  )}
+                >
+                  Regularidad
+                </button>
               </div>
 
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={chartData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {chartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip 
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+              {playerDetailView === 'summary' ? (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <div className="bg-emerald-50 p-3 rounded-2xl text-center">
+                      <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">Asistió</p>
+                      <p className="text-xl font-black text-emerald-700">{selectedPlayer && getPlayerStats(selectedPlayer.id).attending}</p>
+                    </div>
+                    <div className="bg-blue-50 p-3 rounded-2xl text-center">
+                      <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1">Justif.</p>
+                      <p className="text-xl font-black text-blue-700">{selectedPlayer && getPlayerStats(selectedPlayer.id).justified}</p>
+                    </div>
+                    <div className="bg-red-50 p-3 rounded-2xl text-center">
+                      <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mb-1">No Asistió</p>
+                      <p className="text-xl font-black text-red-700">{selectedPlayer && getPlayerStats(selectedPlayer.id).notAttending}</p>
+                    </div>
+                    <div className="bg-amber-50 p-3 rounded-2xl text-center">
+                      <p className="text-[8px] font-black text-amber-600 uppercase tracking-widest mb-1">Ha sido Duda</p>
+                      <p className="text-xl font-black text-amber-700">{selectedPlayer && getPlayerStats(selectedPlayer.id).historicalDoubtful}</p>
+                    </div>
+                    <div className="bg-gray-50 p-3 rounded-2xl text-center">
+                      <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Sin Resp.</p>
+                      <p className="text-xl font-black text-gray-600">{selectedPlayer && getPlayerStats(selectedPlayer.id).noResponse}</p>
+                    </div>
+                  </div>
+
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={chartData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          {chartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip 
+                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <RechartsLegend verticalAlign="bottom" height={36}/>
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </>
+              ) : (
+                <div className="h-64 w-full">
+                  {selectedPlayer && (
+                    <PlayerCumulativeAttendanceChart 
+                      playerId={selectedPlayer.id} 
+                      matches={seasonMatches}
+                      stats={stats}
                     />
-                    <RechartsLegend verticalAlign="bottom" height={36}/>
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
+                  )}
+                </div>
+              )}
 
               <div className="pt-4 border-t border-gray-100 flex justify-between items-center">
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Total Partidos</p>
                 <p className="text-lg font-black text-gray-900">{selectedPlayer && getPlayerStats(selectedPlayer.id).total}</p>
+              </div>
+
+              <div className="mt-2">
+                <Button 
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl h-12 font-bold shadow-lg shadow-emerald-200"
+                  onClick={() => selectedPlayer && navigate(`/players/${selectedPlayer.id}`)}
+                >
+                  Ver Perfil Completo
+                </Button>
               </div>
             </div>
           </DialogContent>
@@ -483,6 +565,14 @@ export default function AttendanceTracker({
                 disabled={isUpdating}
               >
                 <ShieldCheck className="text-blue-500" size={18} /> Justificado
+              </Button>
+              <Button 
+                variant="outline" 
+                className={cn("justify-start gap-3 h-12 rounded-xl border-gray-100 font-bold", editingAttendance?.status === 'doubtful' && "bg-amber-50 border-amber-200 text-amber-700")}
+                onClick={() => handleUpdateStatus('doubtful')}
+                disabled={isUpdating}
+              >
+                <AlertCircle className="text-amber-500" size={18} /> Duda
               </Button>
               <Button 
                 variant="outline" 

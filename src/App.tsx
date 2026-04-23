@@ -22,9 +22,11 @@ import {
   User
 } from 'firebase/auth';
 import { db, auth } from './firebase';
-import { Player, Season, Opponent, Match, PlayerStat, Lineup, Team, Field, PlayerSeason, Injury, SeasonFeesInput } from './types';
+import { Player, Season, Opponent, Match, PlayerStat, Lineup, Team, Field, PlayerSeason, Injury, SeasonFeesInput, StandingsEntry } from './types';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
+import AIAnalysis from './components/AIAnalysis';
+import StandingsView from './components/StandingsView';
 import PlayerList from './components/PlayerList';
 import MatchList from './components/MatchList';
 import LineupSimulator from './components/LineupSimulator';
@@ -59,6 +61,18 @@ export default function App() {
   const [lineups, setLineups] = useState<Lineup[]>([]);
   const [fields, setFields] = useState<Field[]>([]);
   const [injuries, setInjuries] = useState<Injury[]>([]);
+  const [standings, setStandings] = useState<StandingsEntry[]>([]);
+
+  // Default season selection logic
+  useEffect(() => {
+    if (seasons.length > 0 && (globalSeasonId === 'all' || !seasons.find(s => s.id === globalSeasonId))) {
+      // Find the latest season based on startYear
+      const latestSeason = [...seasons].sort((a, b) => b.startYear - a.startYear)[0];
+      if (latestSeason) {
+        setGlobalSeasonId(latestSeason.id);
+      }
+    }
+  }, [seasons]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -80,6 +94,7 @@ export default function App() {
     let unsubFields: any;
     let unsubPlayerSeasons: any;
     let unsubInjuries: any;
+    let unsubStandings: any;
 
     const unsubTeam = onSnapshot(query(collection(db, 'team'), where('ownerId', '==', user.uid)), async (snapshot) => {
       if (!snapshot.empty) {
@@ -123,6 +138,10 @@ export default function App() {
           setInjuries(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Injury)));
         }, (err) => handleFirestoreError(err, OperationType.LIST, 'injuries'));
 
+        unsubStandings = onSnapshot(query(collection(db, 'standings'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setStandings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as StandingsEntry)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'standings'));
+
       } else {
         // Create default team and run migration
         try {
@@ -138,8 +157,16 @@ export default function App() {
           for (const collName of collectionsToMigrate) {
             const snap = await getDocs(collection(db, collName));
             snap.docs.forEach(docSnap => {
-              if (!docSnap.data().teamId) {
-                batch.update(docSnap.ref, { teamId: newTeamId });
+              const data = docSnap.data();
+              const update: any = {};
+              if (!data.teamId) {
+                update.teamId = newTeamId;
+              }
+              if (collName === 'seasons' && data.startYear === undefined) {
+                update.startYear = new Date().getFullYear();
+              }
+              if (Object.keys(update).length > 0) {
+                batch.update(docSnap.ref, update);
               }
             });
           }
@@ -180,6 +207,7 @@ export default function App() {
       if (unsubFields) unsubFields();
       if (unsubPlayerSeasons) unsubPlayerSeasons();
       if (unsubInjuries) unsubInjuries();
+      if (unsubStandings) unsubStandings();
     };
   }, [user]);
 
@@ -302,14 +330,14 @@ export default function App() {
     }
   };
 
-  const addSeason = async (name: string, division: string = '', playerIds: string[] = [], opponentIds: string[] = []) => {
+  const addSeason = async (name: string, division: string = '', startYear: number, playerIds: string[] = [], opponentIds: string[] = []) => {
     if (!team) return;
     try {
       const batch = writeBatch(db);
       
       // 1. Crear la temporada
       const seasonRef = doc(collection(db, 'seasons'));
-      batch.set(seasonRef, { name, division, teamId: team.id });
+      batch.set(seasonRef, { name, division, startYear, teamId: team.id });
       
       // 2. Asociar jugadores seleccionados (PlayerSeason)
       playerIds.forEach(playerId => {
@@ -338,14 +366,14 @@ export default function App() {
     }
   };
 
-  const updateSeason = async (id: string, name: string, division: string, playerIds: string[], opponentIds: string[]) => {
+  const updateSeason = async (id: string, name: string, division: string, startYear: number, playerIds: string[], opponentIds: string[]) => {
     if (!team) return;
     try {
       const batch = writeBatch(db);
       
       // 1. Actualizar nombre de la temporada
       const seasonRef = doc(db, 'seasons', id);
-      batch.update(seasonRef, { name, division });
+      batch.update(seasonRef, { name, division, startYear });
       
       // 2. Actualizar asociación de jugadores (PlayerSeason)
       const psQuery = query(collection(db, 'playerSeasons'), where('seasonId', '==', id));
@@ -601,7 +629,9 @@ export default function App() {
       const snap = await getDocs(q);
       
       if (!snap.empty) {
-        await updateDoc(snap.docs[0].ref, { attendance });
+        const existingData = snap.docs[0].data();
+        const wasDoubtful = existingData.wasDoubtful || attendance === 'doubtful';
+        await updateDoc(snap.docs[0].ref, { attendance, wasDoubtful });
       } else {
         const match = matches.find(m => m.id === matchId);
         await addDoc(collection(db, 'playerStats'), {
@@ -610,6 +640,7 @@ export default function App() {
           matchId,
           seasonId: match?.seasonId || globalSeasonId,
           attendance,
+          wasDoubtful: attendance === 'doubtful',
           goals: 0,
           assists: 0,
           yellowCards: 0,
@@ -724,6 +755,35 @@ export default function App() {
                   fields={fields}
                   injuries={injuries}
                   globalSeasonId={globalSeasonId}
+                  standings={standings}
+                />
+              )}
+              {activeTab === 'ai-analysis' && (
+                <AIAnalysis 
+                  players={players} 
+                  playerSeasons={playerSeasons}
+                  matches={matches} 
+                  stats={stats} 
+                  opponents={opponents} 
+                  seasons={seasons}
+                  fields={fields}
+                  injuries={injuries}
+                  globalSeasonId={globalSeasonId}
+                  standings={standings}
+                  onNavigateToMatch={(matchId) => {
+                    setSelectedMatchId(matchId);
+                    setActiveTab('matches');
+                  }}
+                />
+              )}
+              {activeTab === 'standings' && (
+                <StandingsView 
+                  team={team}
+                  opponents={opponents}
+                  matches={matches}
+                  standings={standings}
+                  globalSeasonId={globalSeasonId}
+                  seasons={seasons}
                 />
               )}
               {activeTab === 'players' && (
@@ -754,6 +814,7 @@ export default function App() {
                   opponents={opponents} 
                   fields={fields}
                   lineups={lineups}
+                  playerSeasons={playerSeasons}
                   injuries={injuries}
                   globalSeasonId={globalSeasonId}
                   onSetActiveTab={(tab, matchId) => {
@@ -763,6 +824,8 @@ export default function App() {
                   onUpdateMatch={updateMatch} 
                   onDeleteMatch={deleteMatch} 
                   onUpdateStats={updateStats}
+                  initialMatchId={selectedMatchId}
+                  onClearInitialMatchId={() => setSelectedMatchId(null)}
                 />
               )}
               {activeTab === 'simulator' && (

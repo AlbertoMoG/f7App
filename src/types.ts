@@ -1,5 +1,5 @@
 export type Position = 'Portero' | 'Defensa' | 'Medio' | 'Delantero';
-export type Attendance = 'attending' | 'notAttending' | 'noResponse' | 'justified';
+export type Attendance = 'attending' | 'notAttending' | 'noResponse' | 'justified' | 'doubtful';
 export type MatchStatus = 'scheduled' | 'completed';
 
 export interface Team {
@@ -13,6 +13,7 @@ export interface Injury {
   id: string;
   teamId: string;
   playerId: string;
+  seasonId: string;
   startDate: string;
   endDate?: string | null;
   cause?: string | null;
@@ -45,6 +46,7 @@ export interface Season {
   teamId: string;
   name: string;
   division?: string;
+  startYear: number;
 }
 
 export interface SeasonFeesInput {
@@ -112,6 +114,7 @@ export interface PlayerStat {
   matchId: string;
   seasonId: string;
   attendance: Attendance;
+  wasDoubtful?: boolean;
   goals: number;
   assists: number;
   yellowCards: number;
@@ -134,4 +137,18 @@ export interface Lineup {
   matchId?: string;
   benchPlayerIds?: string[];
   createdAt: string;
+}
+
+export interface StandingsEntry {
+  id: string;
+  teamId: string;
+  seasonId: string;
+  opponentId: string | 'my-team';
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  points: number;
 }

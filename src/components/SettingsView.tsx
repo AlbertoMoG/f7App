@@ -15,8 +15,8 @@ interface SettingsViewProps {
   matches: Match[];
   fields: Field[];
   team: Team | null;
-  onAddSeason: (name: string, division: string, playerIds?: string[], opponentIds?: string[]) => void;
-  onUpdateSeason: (id: string, name: string, division: string, playerIds: string[], opponentIds: string[]) => void;
+  onAddSeason: (name: string, division: string, startYear: number, playerIds?: string[], opponentIds?: string[]) => void;
+  onUpdateSeason: (id: string, name: string, division: string, startYear: number, playerIds: string[], opponentIds: string[]) => void;
   onDeleteSeason: (id: string) => void;
   onAddOpponent: (name: string, shieldUrl?: string, seasonIds?: string[]) => void;
   onUpdateOpponent: (id: string, name: string, shieldUrl?: string, seasonIds?: string[]) => void;

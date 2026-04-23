@@ -1,5 +1,5 @@
 {
   "name": "Fútbol 7 Manager",
-  "description": "Aplicación para gestionar un equipo de fútbol 7, jugadores, estadísticas y alineaciones.",
+  "description": "Aplicación para gestionar un equipo de fútbol 7, jugadores, estadísticas, alineaciones y control de asistencia con gráficas detalladas.",
   "requestFramePermissions": []
 }

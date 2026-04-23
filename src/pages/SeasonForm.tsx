@@ -23,8 +23,8 @@ interface SeasonFormProps {
   players: Player[];
   playerSeasons: PlayerSeason[];
   opponents: Opponent[];
-  onAddSeason: (name: string, division: string, playerIds: string[], opponentIds: string[]) => void;
-  onUpdateSeason: (id: string, name: string, division: string, playerIds: string[], opponentIds: string[]) => void;
+  onAddSeason: (name: string, division: string, startYear: number, playerIds: string[], opponentIds: string[]) => void;
+  onUpdateSeason: (id: string, name: string, division: string, startYear: number, playerIds: string[], opponentIds: string[]) => void;
 }
 
 export default function SeasonForm({ 
@@ -42,6 +42,7 @@ export default function SeasonForm({
 
   const [name, setName] = React.useState('');
   const [division, setDivision] = React.useState('');
+  const [startYear, setStartYear] = React.useState<number>(new Date().getFullYear());
   const [selectedPlayerIds, setSelectedPlayerIds] = React.useState<string[]>([]);
   const [selectedOpponentIds, setSelectedOpponentIds] = React.useState<string[]>([]);
 
@@ -51,6 +52,7 @@ export default function SeasonForm({
       if (season) {
         setName(season.name);
         setDivision(season.division || '');
+        setStartYear(season.startYear || new Date().getFullYear());
         const seasonPlayerIds = playerSeasons.filter(ps => ps.seasonId === season.id).map(ps => ps.playerId);
         setSelectedPlayerIds(seasonPlayerIds);
         setSelectedOpponentIds(opponents.filter(o => o.seasonIds?.includes(season.id)).map(o => o.id));
@@ -96,10 +98,15 @@ export default function SeasonForm({
       return;
     }
 
+    if (!startYear || startYear < 1900 || startYear > 2100) {
+      toast.error("El año de inicio debe ser válido");
+      return;
+    }
+
     if (isEditing && seasonId) {
-      onUpdateSeason(seasonId, name, division, selectedPlayerIds, selectedOpponentIds);
+      onUpdateSeason(seasonId, name, division, startYear, selectedPlayerIds, selectedOpponentIds);
     } else {
-      onAddSeason(name, division, selectedPlayerIds, selectedOpponentIds);
+      onAddSeason(name, division, startYear, selectedPlayerIds, selectedOpponentIds);
     }
     
     navigate(-1);
@@ -161,17 +168,27 @@ export default function SeasonForm({
               </div>
             </div>
             <CardContent className="p-10">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="space-y-3 md:col-span-2">
                   <Label className="text-xs font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Nombre de la Temporada</Label>
                   <Input 
-                    placeholder="Ej: Temporada 2025/26" 
+                    placeholder="Ej: Liga 2025/26" 
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="rounded-2xl bg-gray-50 border-transparent h-16 text-xl px-6 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all font-bold"
                   />
                 </div>
                 <div className="space-y-3">
+                  <Label className="text-xs font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Año de Comienzo</Label>
+                  <Input 
+                    type="number"
+                    placeholder="Ej: 2025" 
+                    value={startYear}
+                    onChange={(e) => setStartYear(parseInt(e.target.value))}
+                    className="rounded-2xl bg-gray-50 border-transparent h-16 text-xl px-6 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all font-bold"
+                  />
+                </div>
+                <div className="space-y-3 md:col-span-3">
                   <Label className="text-xs font-black text-gray-400 uppercase tracking-[0.2em] ml-1">División / Categoría</Label>
                   <Input 
                     placeholder="Ej: 1ª División, Liga Regional..." 

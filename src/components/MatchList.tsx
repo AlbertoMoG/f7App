@@ -63,7 +63,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Player, Match, PlayerStat, Season, Opponent, Team, Field, Lineup, Injury } from '../types';
+import { Player, Match, PlayerStat, Season, Opponent, Team, Field, Lineup, Injury, PlayerSeason } from '../types';
 import { 
   format, 
   startOfMonth, 
@@ -94,9 +94,12 @@ interface MatchListProps {
   onDeleteMatch: (id: string) => void;
   onUpdateStats: (stats: PlayerStat[]) => void;
   lineups: Lineup[];
+  playerSeasons: PlayerSeason[];
   injuries: Injury[];
   globalSeasonId: string;
   onSetActiveTab: (tab: string, matchId?: string) => void;
+  initialMatchId?: string | null;
+  onClearInitialMatchId?: () => void;
 }
 
 /**
@@ -113,9 +116,12 @@ export default function MatchList({
   fields,
   onDeleteMatch,
   lineups,
+  playerSeasons,
   injuries,
   globalSeasonId,
-  onSetActiveTab
+  onSetActiveTab,
+  initialMatchId,
+  onClearInitialMatchId
 }: MatchListProps) {
   const navigate = useNavigate();
   const [filterOpponent, setFilterOpponent] = React.useState<string>('all');
@@ -131,6 +137,18 @@ export default function MatchList({
   const [noConvocatoriaModalOpen, setNoConvocatoriaModalOpen] = React.useState(false);
   const [showUpcoming, setShowUpcoming] = React.useState(true);
   const instagramPostRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (initialMatchId) {
+      const match = matches.find(m => m.id === initialMatchId);
+      if (match) {
+        setSelectedMatchForDetails(match);
+      }
+      if (onClearInitialMatchId) {
+        onClearInitialMatchId();
+      }
+    }
+  }, [initialMatchId, matches, onClearInitialMatchId]);
 
   const months = [
     { value: '0', label: 'Enero' },
@@ -638,30 +656,35 @@ export default function MatchList({
 
                           <div className="flex flex-col items-center gap-2">
                             {isCompleted && (
-                              <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
-                                Finalizado
-                              </span>
+                              <Badge className={cn(
+                                "text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border shadow-none",
+                                isWin ? "bg-emerald-500 text-white border-emerald-400" :
+                                isLoss ? "bg-red-500 text-white border-red-400" :
+                                "bg-gray-400 text-white border-gray-300"
+                              )}>
+                                {isWin ? 'Victoria' : isLoss ? 'Derrota' : 'Empate'}
+                              </Badge>
                             )}
                             <div className="flex items-center gap-4">
                               {isCompleted ? (
                                 <div className="flex items-center gap-3">
-                                  <span className={cn(
-                                    "text-4xl font-black w-12 h-12 flex items-center justify-center rounded-xl",
-                                    match.isHome !== false 
-                                      ? (isWin ? "bg-emerald-50 text-emerald-600" : "bg-gray-50 text-gray-400")
-                                      : (isLoss ? "bg-emerald-50 text-emerald-600" : "bg-gray-50 text-gray-400")
+                                  <div className={cn(
+                                    "text-4xl font-black w-14 h-14 flex items-center justify-center rounded-2xl shadow-sm border-2",
+                                    isWin ? "bg-emerald-50 border-emerald-200 text-emerald-600" :
+                                    isLoss ? "bg-red-50 border-red-200 text-red-600" :
+                                    "bg-gray-50 border-gray-200 text-gray-500"
                                   )}>
                                     {match.isHome !== false ? match.scoreTeam : match.scoreOpponent}
-                                  </span>
-                                  <span className="text-gray-300 font-bold">-</span>
-                                  <span className={cn(
-                                    "text-4xl font-black w-12 h-12 flex items-center justify-center rounded-xl",
-                                    match.isHome !== false 
-                                      ? (isLoss ? "bg-red-50 text-red-600" : "bg-gray-50 text-gray-400")
-                                      : (isWin ? "bg-red-50 text-red-600" : "bg-gray-50 text-gray-400")
+                                  </div>
+                                  <span className="text-gray-300 font-bold text-2xl">-</span>
+                                  <div className={cn(
+                                    "text-4xl font-black w-14 h-14 flex items-center justify-center rounded-2xl shadow-sm border-2",
+                                    isWin ? "bg-emerald-50 border-emerald-200 text-emerald-600" :
+                                    isLoss ? "bg-red-50 border-red-200 text-red-600" :
+                                    "bg-gray-50 border-gray-200 text-gray-500"
                                   )}>
                                     {match.isHome !== false ? match.scoreOpponent : match.scoreTeam}
-                                  </span>
+                                  </div>
                                 </div>
                               ) : (
                                 <div className="px-6 py-2 bg-blue-50 text-blue-600 rounded-xl font-bold flex items-center gap-2">
@@ -746,19 +769,23 @@ export default function MatchList({
                       <Card 
                         key={match.id} 
                         className={cn(
-                          "border shadow-none hover:shadow-md transition-all rounded-xl cursor-pointer group overflow-hidden",
-                          isCompleted ? (isWin ? "border-emerald-100 bg-emerald-50/10" : isLoss ? "border-red-100 bg-red-50/10" : "border-gray-100") : "border-blue-100 bg-blue-50/10"
+                          "border-2 shadow-none hover:shadow-md transition-all rounded-3xl cursor-pointer group overflow-hidden",
+                          isCompleted 
+                            ? (isWin ? "border-emerald-200 bg-emerald-50/20" : isLoss ? "border-red-200 bg-red-50/20" : "border-gray-200 bg-gray-50/40") 
+                            : "border-blue-100 bg-blue-50/10"
                         )}
                         onClick={() => setSelectedMatchForDetails(match)}
                       >
-                        <CardContent className="p-2.5">
+                        <CardContent className="p-3">
                           <div className="flex items-center gap-3">
                             {/* Date Badge */}
                             <div className={cn(
-                              "flex flex-col items-center justify-center w-12 h-12 rounded-lg shrink-0 border",
-                              isCompleted ? (isWin ? "bg-emerald-600 border-emerald-500 text-white" : isLoss ? "bg-red-600 border-red-500 text-white" : "bg-gray-100 border-gray-200 text-gray-600") : "bg-blue-600 border-blue-500 text-white"
+                              "flex flex-col items-center justify-center w-12 h-12 rounded-2xl shrink-0 border-2 shadow-sm",
+                              isCompleted 
+                                ? (isWin ? "bg-emerald-600 border-emerald-500 text-white" : isLoss ? "bg-red-600 border-red-500 text-white" : "bg-gray-400 border-gray-300 text-white") 
+                                : "bg-blue-600 border-blue-500 text-white"
                             )}>
-                              <span className="text-[10px] font-black uppercase leading-none mb-0.5">
+                              <span className="text-[9px] font-black uppercase leading-none mb-0.5">
                                 {format(new Date(match.date), 'EEE', { locale: es })}
                               </span>
                               <span className="text-lg font-black leading-none">
@@ -769,15 +796,16 @@ export default function MatchList({
                             {/* Match Info */}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between mb-1">
-                                <span className="text-[9px] font-bold text-gray-400 uppercase truncate">
-                                  {format(new Date(match.date), 'HH:mm')} • {match.type === 'league' ? 'Liga' : match.type === 'cup' ? 'Copa' : 'Amistoso'}
-                                  {(() => {
-                                    const season = seasons.find(s => s.id === match.seasonId);
-                                    return season?.division ? ` • ${season.division}` : '';
-                                  })()}
+                                <span className={cn(
+                                  "text-[9px] font-black uppercase tracking-wider truncate",
+                                  isCompleted 
+                                    ? (isWin ? "text-emerald-700" : isLoss ? "text-red-700" : "text-gray-500") 
+                                    : "text-blue-700"
+                                )}>
+                                  {isCompleted ? (isWin ? 'Victoria' : isLoss ? 'Derrota' : 'Empate') : 'Pendiente'}
                                 </span>
                                 {match.round && (
-                                  <span className="text-[9px] font-black text-emerald-600/60 uppercase">
+                                  <span className="text-[9px] font-black text-gray-400 uppercase">
                                     {match.type === 'league' ? `J${match.round}` : match.round}
                                   </span>
                                 )}
@@ -786,16 +814,19 @@ export default function MatchList({
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex items-center gap-2 min-w-0">
                                   {match.isHome !== false ? (
-                                    team?.shieldUrl ? <img src={team.shieldUrl} className="w-5 h-6 object-contain shrink-0" referrerPolicy="no-referrer" /> : <Shield size={12} className="text-gray-300 shrink-0" />
+                                    team?.shieldUrl ? <img src={team.shieldUrl} className="w-5 h-6 object-contain shrink-0" referrerPolicy="no-referrer" /> : <Shield size={12} className="text-gray-400 shrink-0" />
                                   ) : (
-                                    opponent?.shieldUrl ? <img src={opponent.shieldUrl} className="w-5 h-6 object-contain shrink-0" referrerPolicy="no-referrer" /> : <Shield size={12} className="text-gray-300 shrink-0" />
+                                    opponent?.shieldUrl ? <img src={opponent.shieldUrl} className="w-5 h-6 object-contain shrink-0" referrerPolicy="no-referrer" /> : <Shield size={12} className="text-gray-400 shrink-0" />
                                   )}
                                   <span className="text-xs font-bold text-gray-900 truncate">
                                     {match.isHome !== false ? (team?.name || 'MI EQUIPO') : (opponent?.name || 'RIVAL')}
                                   </span>
                                 </div>
                                 {isCompleted && (
-                                  <span className="text-sm font-black text-gray-900">
+                                  <span className={cn(
+                                    "text-base font-black",
+                                    isWin ? "text-emerald-600" : isLoss ? "text-red-600" : "text-gray-500"
+                                  )}>
                                     {match.isHome !== false ? match.scoreTeam : match.scoreOpponent}
                                   </span>
                                 )}
@@ -804,16 +835,19 @@ export default function MatchList({
                               <div className="flex items-center justify-between gap-2 mt-0.5">
                                 <div className="flex items-center gap-2 min-w-0">
                                   {match.isHome !== false ? (
-                                    opponent?.shieldUrl ? <img src={opponent.shieldUrl} className="w-5 h-6 object-contain shrink-0" referrerPolicy="no-referrer" /> : <Shield size={12} className="text-gray-300 shrink-0" />
+                                    opponent?.shieldUrl ? <img src={opponent.shieldUrl} className="w-5 h-6 object-contain shrink-0" referrerPolicy="no-referrer" /> : <Shield size={12} className="text-gray-400 shrink-0" />
                                   ) : (
-                                    team?.shieldUrl ? <img src={team.shieldUrl} className="w-5 h-6 object-contain shrink-0" referrerPolicy="no-referrer" /> : <Shield size={12} className="text-gray-300 shrink-0" />
+                                    team?.shieldUrl ? <img src={team.shieldUrl} className="w-5 h-6 object-contain shrink-0" referrerPolicy="no-referrer" /> : <Shield size={12} className="text-gray-400 shrink-0" />
                                   )}
                                   <span className="text-xs font-bold text-gray-900 truncate">
                                     {match.isHome !== false ? (opponent?.name || 'RIVAL') : (team?.name || 'MI EQUIPO')}
                                   </span>
                                 </div>
                                 {isCompleted ? (
-                                  <span className="text-sm font-black text-gray-900">
+                                  <span className={cn(
+                                    "text-base font-black",
+                                    isLoss ? "text-red-600" : "text-gray-900"
+                                  )}>
                                     {match.isHome !== false ? match.scoreOpponent : match.scoreTeam}
                                   </span>
                                 ) : (
@@ -938,9 +972,8 @@ export default function MatchList({
                         
                         return (
                           <Tooltip key={match.id}>
-                            <TooltipTrigger render={
+                            <TooltipTrigger onClick={() => navigate(`/matches/${match.id}/stats`)}>
                               <div 
-                                onClick={() => navigate(`/matches/${match.id}/stats`)}
                                 className={cn(
                                   "text-[10px] p-1.5 rounded-lg border cursor-pointer transition-all truncate font-bold flex items-center gap-1.5",
                                   !isCompleted ? "bg-blue-50 border-blue-100 text-blue-700 hover:bg-blue-100" :
@@ -957,12 +990,15 @@ export default function MatchList({
                                   {match.isHome !== false ? 'vs ' : '@ '}{opponent?.name || 'Rival'}
                                 </span>
                                 {isCompleted && (
-                                  <span className="ml-auto font-black text-[9px]">
+                                  <span className={cn(
+                                    "ml-auto font-black text-[9px]",
+                                    isWin ? "text-emerald-600" : isLoss ? "text-red-600" : "text-gray-500"
+                                  )}>
                                     {match.isHome !== false ? `${match.scoreTeam}-${match.scoreOpponent}` : `${match.scoreOpponent}-${match.scoreTeam}`}
                                   </span>
                                 )}
                               </div>
-                            } />
+                            </TooltipTrigger>
                             <TooltipContent className="p-3 rounded-xl border-none shadow-xl bg-gray-900 text-white">
                               <div className="space-y-1">
                                 <p className="font-bold text-xs">{opponent?.name || 'Rival'}</p>
@@ -973,9 +1009,14 @@ export default function MatchList({
                                     return season?.division ? ` • ${season.division}` : '';
                                   })()}
                                 </p>
-                                {isCompleted && (
-                                  <p className="text-xs font-black text-emerald-400">Resultado: {match.scoreTeam} - {match.scoreOpponent}</p>
-                                )}
+                              {isCompleted && (
+                                <p className={cn(
+                                  "text-xs font-black",
+                                  isWin ? "text-emerald-400" : isLoss ? "text-red-400" : "text-gray-400"
+                                )}>
+                                  Resultado: {match.scoreTeam} - {match.scoreOpponent}
+                                </p>
+                              )}
                               </div>
                             </TooltipContent>
                           </Tooltip>
@@ -1138,10 +1179,26 @@ export default function MatchList({
             const field = fields.find(f => f.id === match.fieldId);
             const season = seasons.find(s => s.id === match.seasonId);
             const isCompleted = match.status === 'completed';
+            const isWin = isCompleted && (match.scoreTeam || 0) > (match.scoreOpponent || 0);
+            const isLoss = isCompleted && (match.scoreTeam || 0) < (match.scoreOpponent || 0);
+            
+            // Get all players for this season
+            const seasonPlayerIds = playerSeasons
+              .filter(ps => ps.seasonId === match.seasonId)
+              .map(ps => ps.playerId);
+            const seasonPlayers = players.filter(p => seasonPlayerIds.includes(p.id));
+
+            // Organize attendance
             const matchStats = stats.filter(s => s.matchId === match.id && s.attendance === 'attending');
             const justifiedStats = stats.filter(s => s.matchId === match.id && s.attendance === 'justified');
             const notAttendingStats = stats.filter(s => s.matchId === match.id && s.attendance === 'notAttending');
-            const noResponseStats = stats.filter(s => s.matchId === match.id && s.attendance === 'noResponse');
+            
+            // "No Response" includes those with explicit 'noResponse' status OR no status record at all
+            const respondedPlayerIds = stats
+              .filter(s => s.matchId === match.id && s.attendance !== 'noResponse')
+              .map(s => s.playerId);
+            
+            const noResponsePlayers = seasonPlayers.filter(p => !respondedPlayerIds.includes(p.id));
 
             return (
               <>
@@ -1187,10 +1244,28 @@ export default function MatchList({
                       {/* Score/VS */}
                       <div className="flex flex-col items-center gap-2">
                         {isCompleted ? (
-                          <div className="flex items-center gap-4">
-                            <span className="text-5xl font-black">{match.isHome !== false ? match.scoreTeam : match.scoreOpponent}</span>
-                            <span className="text-2xl text-white/30 font-bold">-</span>
-                            <span className="text-5xl font-black">{match.isHome !== false ? match.scoreOpponent : match.scoreTeam}</span>
+                          <div className="flex flex-col items-center gap-3">
+                            <Badge className={cn(
+                              "text-xs font-black uppercase tracking-[0.2em] px-4 py-1 rounded-full border-none shadow-lg",
+                              isWin ? "bg-emerald-500 text-white" : isLoss ? "bg-red-500 text-white" : "bg-gray-500 text-white"
+                            )}>
+                              {isWin ? 'Victoria' : isLoss ? 'Derrota' : 'Empate'}
+                            </Badge>
+                            <div className="flex items-center gap-6">
+                              <span className={cn(
+                                "text-6xl font-black drop-shadow-md",
+                                isWin ? "text-emerald-400" : isLoss ? "text-red-400" : "text-white"
+                              )}>
+                                {match.isHome !== false ? match.scoreTeam : match.scoreOpponent}
+                              </span>
+                              <span className="text-3xl text-white/20 font-bold">-</span>
+                              <span className={cn(
+                                "text-6xl font-black drop-shadow-md",
+                                isLoss ? "text-red-400" : "text-white/90"
+                              )}>
+                                {match.isHome !== false ? match.scoreOpponent : match.scoreTeam}
+                              </span>
+                            </div>
                           </div>
                         ) : (
                           <div className="px-6 py-2 bg-white/10 backdrop-blur-md rounded-xl border border-white/10">
@@ -1273,8 +1348,8 @@ export default function MatchList({
                           {notAttendingStats.length > 0 && (
                             <span className="text-[9px] font-bold text-red-600 uppercase bg-red-50 px-2 py-0.5 rounded-md">{notAttendingStats.length} No Asisten</span>
                           )}
-                          {noResponseStats.length > 0 && (
-                            <span className="text-[9px] font-bold text-gray-500 uppercase bg-gray-100 px-2 py-0.5 rounded-md">{noResponseStats.length} Sin Respuesta</span>
+                          {noResponsePlayers.length > 0 && (
+                            <span className="text-[9px] font-bold text-gray-500 uppercase bg-gray-100 px-2 py-0.5 rounded-md">{noResponsePlayers.length} Sin Respuesta</span>
                           )}
                         </div>
                       </div>
@@ -1297,45 +1372,47 @@ export default function MatchList({
                         <div className="h-px flex-1 bg-gray-100" />
                       </div>
 
-                      {matchStats.length > 0 ? (
+                      {matchStats.length > 0 || justifiedStats.length > 0 || notAttendingStats.length > 0 || noResponsePlayers.length > 0 ? (
                         <div className="space-y-8">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-8">
-                            {['Portero', 'Defensa', 'Medio', 'Delantero'].map((pos) => {
-                              const posStats = matchStats.filter(s => players.find(p => p.id === s.playerId)?.position === pos);
-                              if (posStats.length === 0) return null;
+                          {matchStats.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-8">
+                              {['Portero', 'Defensa', 'Medio', 'Delantero'].map((pos) => {
+                                const posStats = matchStats.filter(s => players.find(p => p.id === s.playerId)?.position === pos);
+                                if (posStats.length === 0) return null;
 
-                              return (
-                                <div key={pos} className="space-y-3">
-                                  <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest px-2 bg-emerald-50 w-fit rounded-md py-0.5">{pos}s</p>
-                                  <div className="space-y-2">
-                                    {posStats.map(stat => {
-                                      const player = players.find(p => p.id === stat.playerId);
-                                      if (!player) return null;
-                                      const hasActions = stat.goals > 0 || stat.assists > 0 || stat.yellowCards > 0 || stat.redCards > 0;
+                                return (
+                                  <div key={pos} className="space-y-3">
+                                    <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest px-2 bg-emerald-50 w-fit rounded-md py-0.5">{pos}s</p>
+                                    <div className="space-y-2">
+                                      {posStats.map(stat => {
+                                        const player = players.find(p => p.id === stat.playerId);
+                                        if (!player) return null;
+                                        const hasActions = stat.goals > 0 || stat.assists > 0 || stat.yellowCards > 0 || stat.redCards > 0;
 
-                                      return (
-                                        <div key={stat.id} className="flex items-center justify-between p-2.5 bg-white border border-gray-100 rounded-xl shadow-sm hover:border-emerald-200 transition-colors">
-                                          <div className="flex items-center gap-2 min-w-0">
-                                            <div className="w-7 h-7 rounded-lg bg-gray-50 flex items-center justify-center border border-gray-100 text-[10px] font-black text-emerald-600 shrink-0">
-                                              {player.number}
+                                        return (
+                                          <div key={stat.id} className="flex items-center justify-between p-2.5 bg-white border border-gray-100 rounded-xl shadow-sm hover:border-emerald-200 transition-colors">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                              <div className="w-7 h-7 rounded-lg bg-gray-50 flex items-center justify-center border border-gray-100 text-[10px] font-black text-emerald-600 shrink-0">
+                                                {player.number}
+                                              </div>
+                                              <span className="font-bold text-gray-900 text-sm truncate">{player.alias || player.firstName}</span>
                                             </div>
-                                            <span className="font-bold text-gray-900 text-sm truncate">{player.alias || player.firstName}</span>
+                                            <div className="flex gap-1 shrink-0">
+                                              {stat.goals > 0 && Array.from({ length: stat.goals }).map((_, i) => <Trophy key={i} size={12} className="text-emerald-500" />)}
+                                              {stat.assists > 0 && Array.from({ length: stat.assists }).map((_, i) => <Star key={i} size={12} className="text-blue-500" />)}
+                                              {stat.yellowCards > 0 && <div className="w-2 h-3 bg-yellow-400 rounded-sm" />}
+                                              {stat.redCards > 0 && <div className="w-2 h-3 bg-red-500 rounded-sm" />}
+                                              {!hasActions && <span className="text-[9px] font-bold text-gray-300 uppercase">Presente</span>}
+                                            </div>
                                           </div>
-                                          <div className="flex gap-1 shrink-0">
-                                            {stat.goals > 0 && Array.from({ length: stat.goals }).map((_, i) => <Trophy key={i} size={12} className="text-emerald-500" />)}
-                                            {stat.assists > 0 && Array.from({ length: stat.assists }).map((_, i) => <Star key={i} size={12} className="text-blue-500" />)}
-                                            {stat.yellowCards > 0 && <div className="w-2 h-3 bg-yellow-400 rounded-sm" />}
-                                            {stat.redCards > 0 && <div className="w-2 h-3 bg-red-500 rounded-sm" />}
-                                            {!hasActions && <span className="text-[9px] font-bold text-gray-300 uppercase">Presente</span>}
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
+                                        );
+                                      })}
+                                    </div>
                                   </div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                                );
+                              })}
+                            </div>
+                          )}
 
                           {justifiedStats.length > 0 && (
                             <div className="space-y-3">
@@ -1379,18 +1456,16 @@ export default function MatchList({
                             </div>
                           )}
 
-                          {noResponseStats.length > 0 && (
+                          {noResponsePlayers.length > 0 && (
                             <div className="space-y-3">
                               <div className="flex items-center gap-3">
                                 <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Sin Respuesta</h4>
                                 <div className="h-px flex-1 bg-gray-100" />
                               </div>
                               <div className="flex flex-wrap gap-2">
-                                {noResponseStats.map(stat => {
-                                  const player = players.find(p => p.id === stat.playerId);
-                                  if (!player) return null;
+                                {noResponsePlayers.map(player => {
                                   return (
-                                    <Badge key={stat.id} variant="secondary" className="bg-gray-100 text-gray-600 border-gray-200 px-3 py-1 rounded-lg flex items-center gap-2">
+                                    <Badge key={player.id} variant="secondary" className="bg-gray-100 text-gray-600 border-gray-200 px-3 py-1 rounded-lg flex items-center gap-2">
                                       <HelpCircle size={12} />
                                       <span className="font-bold">{player.alias || player.firstName}</span>
                                     </Badge>

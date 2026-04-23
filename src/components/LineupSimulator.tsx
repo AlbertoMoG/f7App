@@ -369,11 +369,13 @@ export default function LineupSimulator({
               <RotateCcw size={16} className="mr-2" /> Reiniciar
             </Button>
             
-            <Dialog open={isSaveDialogOpen} onOpenChange={setIsSaveDialogOpen}>
-              <DialogTrigger render={<Button className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl h-10" />}>
-                <Save size={16} className="mr-2" /> Guardar
-              </DialogTrigger>
-              <DialogContent className="rounded-2xl">
+              <Dialog open={isSaveDialogOpen} onOpenChange={setIsSaveDialogOpen}>
+                <DialogTrigger render={
+                  <Button className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl h-10">
+                    <Save size={16} className="mr-2" /> Guardar
+                  </Button>
+                } />
+                <DialogContent className="rounded-2xl">
                 <DialogHeader>
                   <DialogTitle>Guardar Alineación</DialogTitle>
                   <DialogDescription>Asigna un nombre a esta configuración táctica.</DialogDescription>
@@ -463,7 +465,7 @@ export default function LineupSimulator({
                         const isInLineup = currentLineup.includes(player.id);
                         return (
                           <Tooltip key={player.id}>
-                            <TooltipTrigger render={
+                            <TooltipTrigger>
                               <div
                                 draggable={!isInLineup}
                                 onDragStart={() => setDraggedPlayerId(player.id)}
@@ -499,7 +501,7 @@ export default function LineupSimulator({
                                   )}
                                 </div>
                               </div>
-                            } />
+                            </TooltipTrigger>
                             <TooltipContent side="top" className="bg-gray-900 text-white border-none font-bold text-[10px] px-2 py-1">
                               {player.alias || `${player.firstName} ${player.lastName}`}
                             </TooltipContent>

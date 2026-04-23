@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { doc, getDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Player, PlayerStat, Match, Season, Opponent, Team, Injury } from '../types';
-import { ArrowLeft, Calendar, Shield, Sword, Crosshair, Filter, Stethoscope, Activity, History } from 'lucide-react';
+import { ArrowLeft, Calendar, Shield, Sword, Crosshair, Filter, Stethoscope, Activity, History, Users, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -12,8 +12,34 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
-import { calculatePlayerRating } from '../lib/ratingSystem';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { 
+  calculatePlayerRating, 
+  PESO_COMPROMISO, 
+  PESO_DESEMPENO, 
+  META_EXCELENCIA, 
+  BONO_REGULARIDAD_PUNTOS, 
+  PUNTOS_VICTORIA, 
+  PUNTOS_EMPATE, 
+  PUNTOS_DERROTA, 
+  PUNTOS_BAJO_4_GOLES, 
+  PUNTOS_GOL, 
+  PUNTOS_ASISTENCIA, 
+  PUNTOS_AMARILLA, 
+  PUNTOS_ROJA, 
+  PUNTOS_SIN_CONTESTAR, 
+  PUNTOS_NO_ASISTENCIA 
+} from '../lib/ratingSystem';
+import { 
+  Tooltip, 
+  TooltipContent, 
+  TooltipTrigger, 
+  TooltipProvider 
+} from '@/components/ui/tooltip';
+import { Info } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
+import PlayerCumulativeAttendanceChart from '../components/PlayerCumulativeAttendanceChart';
 
 const positionIcons: Record<string, any> = {
   'Portero': Shield,
@@ -45,6 +71,7 @@ export default function PlayerProfile() {
   // Filters
   const [selectedSeasonId, setSelectedSeasonId] = useState<string>('all');
   const [selectedMatchType, setSelectedMatchType] = useState<string>('all');
+  const [attendanceView, setAttendanceView] = useState<'summary' | 'regularity'>('summary');
 
   useEffect(() => {
     const fetchPlayerData = async () => {
@@ -209,7 +236,7 @@ export default function PlayerProfile() {
     return acc;
   }, { matches: 0, goals: 0, assists: 0, yellowCards: 0, redCards: 0, justified: 0, unjustified: 0, noResponse: 0 });
 
-  const rating = calculatePlayerRating(Object.values(matches), injuries, stats, player, selectedSeasonId);
+  const rating = calculatePlayerRating(Object.values(matches), injuries, stats, player, selectedSeasonId, Object.values(seasons));
 
   const attendanceData = [
     { name: 'Asiste', value: totalStats.matches, color: '#10B981' },
@@ -259,14 +286,14 @@ export default function PlayerProfile() {
 
   const evolutionData = allTeamMatches.map((match, index) => {
     const matchesUpToNow = allTeamMatches.slice(0, index + 1);
-    const currentRating = calculatePlayerRating(matchesUpToNow, injuries, stats, player, selectedSeasonId);
+    const currentRating = calculatePlayerRating(matchesUpToNow, injuries, stats, player, selectedSeasonId, Object.values(seasons));
     
     return {
       date: format(new Date(match.date), 'dd/MM'),
       opponent: opponents[match.opponentId]?.name || 'Rival',
-      baremo: Number(currentRating.notaFinal.toFixed(1)),
-      desempeno: Number(currentRating.notaDesempeno.toFixed(1)),
-      compromiso: Number(currentRating.notaCompromiso.toFixed(1)),
+      baremo: currentRating.notaFinal,
+      desempeno: currentRating.notaDesempeno,
+      compromiso: currentRating.notaCompromiso,
       round: match.round || '',
       seasonName: seasons[match.seasonId]?.name || '',
       matchId: match.id
@@ -280,12 +307,78 @@ export default function PlayerProfile() {
     'Delantero': 'DEL'
   };
 
+  const generatePDFReport = () => {
+    const doc = new jsPDF();
+    
+    const seasonName = selectedSeasonId === 'all' ? 'Todas las temporadas' : (seasons[selectedSeasonId]?.name || 'Temporada');
+    
+    const played = totalStats.matches;
+    const notPlayed = rating.partidosLesionado + totalStats.justified + totalStats.unjustified + totalStats.noResponse;
+
+    let won = 0;
+    let tied = 0;
+    let lost = 0;
+
+    stats.forEach(stat => {
+      const match = matches[stat.matchId];
+      if (!match || match.status !== 'completed' || stat.attendance !== 'attending') return;
+      const matchTypeMatches = selectedMatchType === 'all' || match.type === selectedMatchType;
+      const seasonMatches = selectedSeasonId === 'all' || stat.seasonId === selectedSeasonId;
+      
+      if (matchTypeMatches && seasonMatches) {
+        if ((match.scoreTeam || 0) > (match.scoreOpponent || 0)) won++;
+        else if ((match.scoreTeam || 0) === (match.scoreOpponent || 0)) tied++;
+        else lost++;
+      }
+    });
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.text(`Informe Asistencia: ${player.firstName} ${player.lastName} ${player.alias ? `"${player.alias}"` : ''}`, 14, 22);
+    
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Temporada: ${seasonName}`, 14, 30);
+    doc.text(`Competición: ${selectedMatchType === 'all' ? 'Todas' : (selectedMatchType === 'league' ? 'Liga' : selectedMatchType === 'cup' ? 'Copa' : 'Amistoso')}`, 14, 36);
+
+    autoTable(doc, {
+      startY: 45,
+      head: [['Métrica de Asistencia', 'Cantidad']],
+      body: [
+        ['Partidos Jugados', played.toString()],
+        ['Partidos No Jugados (Justificados, ausencias, lesiones)', notPlayed.toString()],
+      ],
+      headStyles: { fillColor: [16, 185, 129] },
+    });
+
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable.finalY + 15,
+      head: [['Hitos del Equipo (Solo cuando el jugador participó)', 'Partidos']],
+      body: [
+        ['Partidos Ganados', won.toString()],
+        ['Partidos Empatados', tied.toString()],
+        ['Partidos Perdidos', lost.toString()]
+      ],
+      headStyles: { fillColor: [59, 130, 246] },
+    });
+
+    doc.save(`Informe_${player.firstName}_${seasonName.replace(/ /g, '_')}.pdf`);
+  };
+
   return (
     <div className="min-h-screen bg-[#F5F5F0] p-2 md:p-4">
       <div className="max-w-screen-2xl mx-auto">
-        <Button variant="ghost" onClick={() => navigate('/')} className="mb-6">
-          <ArrowLeft size={20} className="mr-2" /> Volver
-        </Button>
+        <div className="flex justify-between items-center mb-6">
+          <Button variant="ghost" onClick={() => navigate('/')}>
+            <ArrowLeft size={20} className="mr-2" /> Volver
+          </Button>
+          <Button 
+            onClick={generatePDFReport} 
+            className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
+          >
+            <Download size={16} className="mr-2" /> Informe Asistencia (PDF)
+          </Button>
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Left Column: Player Card (Sticky) */}
@@ -301,7 +394,7 @@ export default function PlayerProfile() {
                     {/* Rating & Position Box */}
                     <div className="flex flex-col items-center bg-black/40 backdrop-blur-sm border border-white/20 rounded-tl-xl rounded-br-xl p-2 shadow-lg min-w-[3.5rem]">
                       <span className="text-[8px] font-bold text-yellow-300 uppercase tracking-wider mb-0.5">Baremo</span>
-                      <span className="text-4xl font-black italic tracking-tighter leading-none">{rating.notaFinal.toFixed(0)}</span>
+                      <span className="text-4xl font-black italic tracking-tighter leading-none">{rating.notaFinal}</span>
                       <div className="w-full h-px bg-white/30 my-1"></div>
                       <span className="text-sm font-bold uppercase tracking-widest">{shortPositions[player.position] || player.position}</span>
                     </div>
@@ -340,16 +433,102 @@ export default function PlayerProfile() {
                     {/* Advanced Stats: Baremo, Compromiso, Desempeño */}
                     <div className="grid grid-cols-3 w-full gap-2 mb-2 text-center">
                       <div className="flex flex-col">
-                        <span className="text-[10px] text-yellow-300 font-bold uppercase">Baremo</span>
-                        <span className="font-black text-lg">{rating.notaFinal.toFixed(1)}</span>
+                        <div className="flex items-center gap-1 justify-center">
+                          <span className="text-[10px] text-yellow-300 font-bold uppercase">Baremo</span>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <span className="inline-flex">
+                                  <Info size={10} className="text-yellow-300/60 cursor-help" />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent className="p-4 bg-gray-900 text-white border-none rounded-2xl shadow-2xl min-w-[240px]">
+                                <p className="font-bold mb-2 text-yellow-400 border-b border-white/10 pb-1 flex items-center gap-2">
+                                  <Users size={14} /> Desglose: {player.alias || player.firstName}
+                                </p>
+                                
+                                <div className="space-y-4">
+                                  <div className="grid grid-cols-2 gap-y-1 gap-x-4 text-[10px]">
+                                    <span className="text-gray-400">P. Finalizados:</span>
+                                    <span className="font-bold text-right">{rating.partidosComputables}</span>
+                                    <span className="text-gray-400">P. Asistidos:</span>
+                                    <span className="font-bold text-emerald-400 text-right">{rating.partidosAsistidos}</span>
+                                    <span className="text-gray-400">P. Justificados:</span>
+                                    <span className="font-bold text-blue-400 text-right">{rating.partidosJustificados}</span>
+                                    <span className="text-gray-400">P. No Asistidos:</span>
+                                    <span className="font-bold text-red-400 text-right">{rating.partidosNoAsistencia}</span>
+                                    <span className="text-gray-400">P. Sin Rspcta.:</span>
+                                    <span className="font-bold text-gray-400 text-right">{rating.partidosSinRespuesta}</span>
+                                    <span className="text-gray-400">P. Lesionado:</span>
+                                    <span className="font-bold text-red-500 text-right">{rating.partidosLesionado}</span>
+                                  </div>
+
+                                  <div className="bg-white/5 p-2 rounded-xl space-y-2">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-gray-300 font-bold uppercase text-[9px]">1. Compromiso ({PESO_COMPROMISO * 100}%)</span>
+                                      <span className="font-black text-blue-400 text-[12px]">{rating.notaCompromiso}</span>
+                                    </div>
+                                    <div className="flex justify-between text-[10px]">
+                                      <span className="text-gray-400 italic">Asistencia Efectiva:</span>
+                                      <span className="font-medium text-emerald-500">{rating.asistenciaEfectiva} pts</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="bg-white/5 p-2 rounded-xl space-y-2">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-gray-300 font-bold uppercase text-[9px]">2. Desempeño ({PESO_DESEMPENO * 100}%)</span>
+                                      <span className="font-black text-orange-400 text-[12px]">{rating.notaDesempeno}</span>
+                                    </div>
+                                    <div className="flex justify-between text-[10px]">
+                                      <span className="text-gray-400 italic">Desempeño Puro:</span>
+                                      <span className="font-medium text-emerald-500">{rating.notaDesempenoPura} pts</span>
+                                    </div>
+                                    <div className="flex justify-between text-[10px]">
+                                      <span className="text-gray-400 italic">Participación ({rating.porcentajeParticipacion}%):</span>
+                                      <span className="font-medium text-orange-400">×{rating.factorFiabilidad}</span>
+                                    </div>
+                                    <div className="flex justify-between text-[10px]">
+                                      <span className="text-gray-400 italic">Pts. Totales / Media:</span>
+                                      <span className="font-medium text-blue-400">{rating.puntosTotales} / {rating.mediaPorPartido}</span>
+                                    </div>
+                                    {(player.position === 'Portero' || player.position === 'Defensa') && (
+                                       <div className="flex justify-between text-[10px]">
+                                         <span className="text-gray-400 italic">Bono Defensivo (&lt; 4 Gls):</span>
+                                         <span className="font-medium text-emerald-400">{rating.partidosBajo4Goles}</span>
+                                       </div>
+                                    )}
+                                  </div>
+
+                                  <div className="flex justify-between items-center pt-2 border-t border-white/10">
+                                    <div className="flex flex-col">
+                                      <span className="text-gray-400 text-[9px]">Racha Máx: {rating.rachaMaxima}</span>
+                                      <span className="text-emerald-400 font-bold text-[10px]">Bono Reg: +{rating.bonoRegularidad}</span>
+                                      {rating.penalizacionRegularidad > 0 && (
+                                        <>
+                                          <span className="text-gray-400 text-[9px] mt-1 border-t border-white/5 pt-1">Racha Ausencias: {rating.rachaMaximaAusencias}</span>
+                                          <span className="text-red-400 font-bold text-[9px]">Pen. Ausencia: -{rating.penalizacionRegularidad}</span>
+                                        </>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col items-end">
+                                      <span className="text-gray-400 text-[8px] uppercase font-bold">Nota Final</span>
+                                      <span className="font-black text-emerald-400 text-base leading-none">{rating.notaFinal}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
+                        <span className="font-black text-lg">{rating.notaFinal}</span>
                       </div>
                       <div className="flex flex-col border-x border-white/20">
                         <span className="text-[10px] text-emerald-300 font-bold uppercase">Compromiso</span>
-                        <span className="font-black text-lg">{rating.notaCompromiso.toFixed(1)}</span>
+                        <span className="font-black text-lg">{rating.notaCompromiso}</span>
                       </div>
                       <div className="flex flex-col">
                         <span className="text-[10px] text-blue-300 font-bold uppercase">Desempeño</span>
-                        <span className="font-black text-lg">{rating.notaDesempeno.toFixed(1)}</span>
+                        <span className="font-black text-lg">{rating.notaDesempeno}</span>
                       </div>
                     </div>
 
@@ -489,43 +668,71 @@ export default function PlayerProfile() {
             {/* Charts */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               <Card className="border-none shadow-sm rounded-2xl">
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-lg">Asistencia</CardTitle>
+                  <div className="flex bg-gray-100 p-1 rounded-lg">
+                    <button 
+                      onClick={() => setAttendanceView('summary')}
+                      className={cn(
+                        "px-2 py-1 text-[10px] font-black uppercase rounded-md transition-all",
+                        attendanceView === 'summary' ? "bg-white text-gray-900 shadow-sm" : "text-gray-400 hover:text-gray-600"
+                      )}
+                    >
+                      Resumen
+                    </button>
+                    <button 
+                      onClick={() => setAttendanceView('regularity')}
+                      className={cn(
+                        "px-2 py-1 text-[10px] font-black uppercase rounded-md transition-all",
+                        attendanceView === 'regularity' ? "bg-white text-gray-900 shadow-sm" : "text-gray-400 hover:text-gray-600"
+                      )}
+                    >
+                      Regularidad
+                    </button>
+                  </div>
                 </CardHeader>
                 <CardContent className="h-64 flex flex-col">
-                  {attendanceData.length > 0 ? (
-                    <>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={attendanceData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={80}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            {attendanceData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                          </Pie>
-                          <RechartsTooltip />
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div className="flex flex-wrap justify-center gap-4 mt-2">
-                        {attendanceData.map(d => (
-                          <div key={d.name} className="flex items-center gap-1.5 text-xs">
-                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }}></div>
-                            <span className="text-gray-600">{d.name} ({d.value})</span>
-                          </div>
-                        ))}
+                  {attendanceView === 'summary' ? (
+                    attendanceData.length > 0 ? (
+                      <>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={attendanceData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={5}
+                              dataKey="value"
+                            >
+                              {attendanceData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <RechartsTooltip />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="flex flex-wrap justify-center gap-4 mt-2">
+                          {attendanceData.map(d => (
+                            <div key={d.name} className="flex items-center gap-1.5 text-xs">
+                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }}></div>
+                              <span className="text-gray-600">{d.name} ({d.value})</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex-1 flex items-center justify-center text-gray-400 italic text-sm">
+                        No hay datos de asistencia
                       </div>
-                    </>
+                    )
                   ) : (
-                    <div className="flex-1 flex items-center justify-center text-gray-400 italic text-sm">
-                      No hay datos de asistencia
-                    </div>
+                    <PlayerCumulativeAttendanceChart 
+                      playerId={playerId || ''}
+                      matches={allTeamMatches}
+                      stats={stats}
+                    />
                   )}
                 </CardContent>
               </Card>
@@ -587,7 +794,7 @@ export default function PlayerProfile() {
                                         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
                                         <span className="text-gray-600">{entry.name}</span>
                                       </div>
-                                      <span className="font-black" style={{ color: entry.color }}>{Number(entry.value).toFixed(1)}</span>
+                                      <span className="font-black" style={{ color: entry.color }}>{Math.round(Number(entry.value))}</span>
                                     </div>
                                   ))}
                                 </div>
