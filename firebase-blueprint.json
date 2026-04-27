@@ -45,7 +45,14 @@
         "opponentId": { "type": "string" },
         "scoreTeam": { "type": "number" },
         "scoreOpponent": { "type": "number" },
-        "status": { "type": "string", "enum": ["scheduled", "completed"] }
+        "status": { "type": "string", "enum": ["scheduled", "completed"] },
+        "savedPrediction": {
+          "type": "object",
+          "properties": {
+            "team": { "type": "number" },
+            "opponent": { "type": "number" }
+          }
+        }
       },
       "required": ["seasonId", "date", "opponentId", "status"]
     },

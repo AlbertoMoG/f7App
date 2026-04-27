@@ -63,13 +63,15 @@ export default function App() {
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [standings, setStandings] = useState<StandingsEntry[]>([]);
 
-  // Default season selection logic
+  // Default season selection logic - Initialize only once when seasons are loaded
+  const initialSeasonSet = React.useRef(false);
   useEffect(() => {
-    if (seasons.length > 0 && (globalSeasonId === 'all' || !seasons.find(s => s.id === globalSeasonId))) {
+    if (!initialSeasonSet.current && seasons.length > 0) {
       // Find the latest season based on startYear
       const latestSeason = [...seasons].sort((a, b) => b.startYear - a.startYear)[0];
       if (latestSeason) {
         setGlobalSeasonId(latestSeason.id);
+        initialSeasonSet.current = true;
       }
     }
   }, [seasons]);
@@ -760,6 +762,7 @@ export default function App() {
               )}
               {activeTab === 'ai-analysis' && (
                 <AIAnalysis 
+                  team={team}
                   players={players} 
                   playerSeasons={playerSeasons}
                   matches={matches} 

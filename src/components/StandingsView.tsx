@@ -11,7 +11,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Trophy, Save, ListRestart, Info } from 'lucide-react';
+import { Trophy, Save, ListRestart, Info, Brain, TrendingUp } from 'lucide-react';
 import { Match, Opponent, StandingsEntry, Team, Season } from '../types';
 import { collection, addDoc, updateDoc, doc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -149,6 +149,45 @@ export default function StandingsView({ team, opponents, matches, standings, glo
       return b.goalsFor - a.goalsFor;
     });
   }, [opponents, standings, matches, team, currentSeasonId]);
+
+  const predictedStandings = useMemo(() => {
+    const totalTeams = fullStandings.length;
+    if (totalTeams === 0) return [];
+
+    const totalLeagueMatches = (totalTeams - 1) * 2; // Asumimos ida y vuelta
+    const totalPlayedAll = fullStandings.reduce((acc, t) => acc + t.played, 0);
+    const globalPPM = totalPlayedAll > 0 ? (fullStandings.reduce((acc, t) => acc + t.points, 0) / totalPlayedAll) : 1.3;
+
+    return fullStandings.map(team => {
+      // Regresión a la media para equipos con pocos partidos
+      const weight = Math.min(1, team.played / 5);
+      const teamPPM = team.played > 0 ? team.points / team.played : globalPPM;
+      const expectedPPM = (teamPPM * weight) + (globalPPM * (1 - weight));
+
+      const gfpm = team.played > 0 ? team.goalsFor / team.played : 1.5;
+      const gcpm = team.played > 0 ? team.goalsAgainst / team.played : 1.5;
+      
+      const remMatches = Math.max(0, totalLeagueMatches - team.played);
+      
+      const projectedPoints = team.points + (expectedPPM * remMatches);
+      const projectedGF = team.goalsFor + (gfpm * remMatches);
+      const projectedGC = team.goalsAgainst + (gcpm * remMatches);
+      
+      return {
+        ...team,
+        projectedPoints: Math.round(projectedPoints),
+        projectedGF: Math.round(projectedGF),
+        projectedGC: Math.round(projectedGC),
+        projectedPlayed: totalLeagueMatches
+      };
+    }).sort((a, b) => {
+      if (b.projectedPoints !== a.projectedPoints) return b.projectedPoints - a.projectedPoints;
+      const aDiff = a.projectedGF - a.projectedGC;
+      const bDiff = b.projectedGF - b.projectedGC;
+      if (bDiff !== aDiff) return bDiff - aDiff;
+      return b.projectedGF - a.projectedGF;
+    });
+  }, [fullStandings]);
 
   const handleInputChange = (opponentId: string, field: keyof StandingsEntry, value: string) => {
     const numValue = parseInt(value) || 0;
@@ -381,6 +420,80 @@ export default function StandingsView({ team, opponents, matches, standings, glo
                           onChange={(e) => handleInputChange(row.opponentId, 'points', e.target.value)}
                         />
                       ) : row.points}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* AI Prediction Section */}
+      <Card className="rounded-2xl border-emerald-100/50 bg-emerald-50/20 overflow-hidden mt-8 shadow-sm">
+        <CardHeader className="bg-emerald-50/50 border-b border-emerald-100/50">
+          <CardTitle className="text-lg flex items-center gap-2 text-emerald-800">
+            <Brain className="h-5 w-5 text-emerald-600" />
+            Proyección Final (IA)
+          </CardTitle>
+          <CardDescription className="flex items-center gap-1.5 text-emerald-600/70">
+            <TrendingUp className="h-3.5 w-3.5" />
+            Estimación de la clasificación final tras {(fullStandings.length - 1) * 2} jornadas.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader className="bg-emerald-50/30">
+              <TableRow>
+                <TableHead className="w-12 text-center text-emerald-700 font-semibold">Pos</TableHead>
+                <TableHead className="text-emerald-700 font-semibold">Equipo</TableHead>
+                <TableHead className="text-center text-emerald-700/70">PJ Est.</TableHead>
+                <TableHead className="text-center text-emerald-700/70">GF Est.</TableHead>
+                <TableHead className="text-center text-emerald-700/70">GC Est.</TableHead>
+                <TableHead className="text-center text-emerald-700/70">DG Est.</TableHead>
+                <TableHead className="text-center font-bold text-emerald-800">PTS Est.</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {predictedStandings.map((row, index) => {
+                const isMyTeam = row.opponentId === 'my-team';
+
+                return (
+                  <TableRow key={row.opponentId} className={isMyTeam ? "bg-emerald-100/30 hover:bg-emerald-100/50 font-medium" : "hover:bg-emerald-50/30"}>
+                    <TableCell className="text-center font-bold text-emerald-600/60">
+                      {index + 1}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center overflow-hidden border border-emerald-100">
+                          {row.shieldUrl ? (
+                            <img src={row.shieldUrl} alt={row.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <Trophy className="h-4 w-4 text-emerald-200" />
+                          )}
+                        </div>
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2">
+                            {isMyTeam && <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 uppercase text-[10px]">Tu Equipo</Badge>}
+                            <span className={isMyTeam ? "text-emerald-800 font-bold" : "text-emerald-950/80"}>{row.name}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center text-emerald-700/60 font-medium">
+                      {row.projectedPlayed}
+                    </TableCell>
+                    <TableCell className="text-center text-emerald-700/60 font-medium">
+                      {row.projectedGF}
+                    </TableCell>
+                    <TableCell className="text-center text-emerald-700/60 font-medium">
+                      {row.projectedGC}
+                    </TableCell>
+                    <TableCell className="text-center text-emerald-700/60 font-medium">
+                      {row.projectedGF - row.projectedGC}
+                    </TableCell>
+                    <TableCell className="text-center font-black text-emerald-700 bg-white/50">
+                      {row.projectedPoints}
                     </TableCell>
                   </TableRow>
                 );

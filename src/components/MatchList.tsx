@@ -29,7 +29,8 @@ import {
   MoreVertical,
   ShieldCheck,
   XCircle,
-  HelpCircle
+  HelpCircle,
+  AlertCircle
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { Button } from '@/components/ui/button';
@@ -1192,6 +1193,7 @@ export default function MatchList({
             const matchStats = stats.filter(s => s.matchId === match.id && s.attendance === 'attending');
             const justifiedStats = stats.filter(s => s.matchId === match.id && s.attendance === 'justified');
             const notAttendingStats = stats.filter(s => s.matchId === match.id && s.attendance === 'notAttending');
+            const doubtfulStats = stats.filter(s => s.matchId === match.id && s.attendance === 'doubtful');
             
             // "No Response" includes those with explicit 'noResponse' status OR no status record at all
             const respondedPlayerIds = stats
@@ -1342,6 +1344,9 @@ export default function MatchList({
                         <p className="text-3xl font-black text-emerald-900">{matchStats.length}</p>
                         <p className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em]">Jugadores Convocados</p>
                         <div className="flex flex-wrap justify-center gap-2 mt-2">
+                          {doubtfulStats.length > 0 && (
+                            <span className="text-[9px] font-bold text-amber-600 uppercase bg-amber-50 px-2 py-0.5 rounded-md">{doubtfulStats.length} Dudas</span>
+                          )}
                           {justifiedStats.length > 0 && (
                             <span className="text-[9px] font-bold text-blue-600 uppercase bg-blue-50 px-2 py-0.5 rounded-md">{justifiedStats.length} Justificados</span>
                           )}
@@ -1448,6 +1453,27 @@ export default function MatchList({
                                   return (
                                     <Badge key={stat.id} variant="secondary" className="bg-red-50 text-red-700 border-red-100 px-3 py-1 rounded-lg flex items-center gap-2">
                                       <XCircle size={12} />
+                                      <span className="font-bold">{player.alias || player.firstName}</span>
+                                    </Badge>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {doubtfulStats.length > 0 && (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-3">
+                                <h4 className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Dudas</h4>
+                                <div className="h-px flex-1 bg-amber-50" />
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {doubtfulStats.map(stat => {
+                                  const player = players.find(p => p.id === stat.playerId);
+                                  if (!player) return null;
+                                  return (
+                                    <Badge key={stat.id} variant="secondary" className="bg-amber-50 text-amber-700 border-amber-100 px-3 py-1 rounded-lg flex items-center gap-2">
+                                      <AlertCircle size={12} />
                                       <span className="font-bold">{player.alias || player.firstName}</span>
                                     </Badge>
                                   );

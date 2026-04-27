@@ -105,6 +105,10 @@ export interface Match {
   isHome?: boolean | null;
   location?: string | null;
   fieldId?: string | null;
+  savedPrediction?: {
+    team: number;
+    opponent: number;
+  } | null;
 }
 
 export interface PlayerStat {

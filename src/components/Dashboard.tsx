@@ -218,6 +218,57 @@ export default function Dashboard({
     }).sort((a, b) => b.goals - a.goals).slice(0, 8);
   }, [filteredStats, filteredPlayers, players]);
 
+  // Top Tarjeteros
+  const playerCards = React.useMemo(() => {
+    const playerCardsMap = new Map<string, { yellow: number, red: number, points: number }>();
+    filteredStats.forEach(s => {
+      if (filteredPlayers.some(p => p.id === s.playerId)) {
+        if (s.yellowCards > 0 || s.redCards > 0) {
+          const current = playerCardsMap.get(s.playerId) || { yellow: 0, red: 0, points: 0 };
+          current.yellow += s.yellowCards || 0;
+          current.red += s.redCards || 0;
+          current.points += (s.yellowCards || 0) + (s.redCards || 0) * 2; // Red matters more
+          playerCardsMap.set(s.playerId, current);
+        }
+      }
+    });
+
+    return Array.from(playerCardsMap.entries()).map(([playerId, stats]) => {
+      const p = players.find(p => p.id === playerId);
+      return {
+        id: playerId,
+        name: p ? (p.alias || p.firstName) : 'Desconocido',
+        photoUrl: p?.photoUrl,
+        stats
+      };
+    }).sort((a, b) => b.stats.points - a.stats.points).slice(0, 5);
+  }, [filteredStats, filteredPlayers, players]);
+
+  // Next Match & Last 5
+  const nextMatchInfo = React.useMemo(() => {
+    if (scheduledMatches.length === 0) return null;
+    const nextMatch = scheduledMatches[0];
+    const opponent = opponents.find(o => o.id === nextMatch.opponentId);
+    const field = fields.find(f => f.id === nextMatch.fieldId);
+    return { match: nextMatch, opponent, field };
+  }, [scheduledMatches, opponents, fields]);
+
+  const last5Matches = React.useMemo(() => {
+    return matchesWithScores.slice(-5).map(m => {
+        const opponent = opponents.find(o => o.id === m.opponentId);
+        const isWin = m.scoreTeam! > m.scoreOpponent!;
+        const isDraw = m.scoreTeam! === m.scoreOpponent!;
+        const isLoss = m.scoreTeam! < m.scoreOpponent!;
+        return {
+            ...m,
+            opponentName: opponent?.name || 'Desconocido',
+            opponentShield: opponent?.shieldUrl,
+            result: isWin ? 'W' : (isDraw ? 'D' : 'L')
+        };
+    });
+  }, [matchesWithScores, opponents]);
+
+
   // 4. Histórico vs Rivales (filtrado)
   const opponentStats = React.useMemo(() => {
     return opponents.map(opp => {
@@ -375,22 +426,47 @@ export default function Dashboard({
     };
   }, [filteredPlayers, calculateAge]);
 
-  const stats_cards = [
-    { title: 'Victorias', value: wins, icon: Trophy, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { title: 'Empates', value: draws, icon: Activity, color: 'text-gray-600', bg: 'bg-gray-50' },
-    { title: 'Derrotas', value: losses, icon: Target, color: 'text-red-600', bg: 'bg-red-50' },
-    { title: 'Racha Victorias', value: winStreak, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { title: 'Racha Empates', value: drawStreak, icon: Activity, color: 'text-gray-600', bg: 'bg-gray-50' },
-    { title: 'Racha Derrotas', value: lossStreak, icon: TrendingDown, color: 'text-red-600', bg: 'bg-red-50' },
-    { title: 'Goles Favor', value: totalGoals, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { title: 'Goles Contra', value: totalGoalsAgainst, icon: TrendingDown, color: 'text-orange-600', bg: 'bg-orange-50' },
-    { title: 'Amarillas', value: totalYellowCards, icon: Target, color: 'text-yellow-600', bg: 'bg-yellow-50' },
-    { title: 'Rojas', value: totalRedCards, icon: Target, color: 'text-red-700', bg: 'bg-red-100' },
-    { title: 'Lesionados', value: currentlyInjured, icon: Bandage, color: 'text-red-500', bg: 'bg-red-50' },
-    { title: 'Jugados', value: completedMatches.length, icon: Calendar, color: 'text-purple-600', bg: 'bg-purple-50' },
-    { title: 'Programados', value: scheduledMatches.length, icon: Clock, color: 'text-orange-600', bg: 'bg-orange-50' },
-    { title: 'Jugadores', value: filteredPlayers.length, icon: Users, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-    { title: 'Asistencias', value: totalAssists, icon: Users, color: 'text-pink-600', bg: 'bg-pink-50' },
+  const statGroups = [
+    {
+      title: "Resultados",
+      cards: [
+        { title: 'Victorias', value: wins, icon: Trophy, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+        { title: 'Empates', value: draws, icon: Activity, color: 'text-gray-600', bg: 'bg-gray-50' },
+        { title: 'Derrotas', value: losses, icon: Target, color: 'text-red-600', bg: 'bg-red-50' },
+      ]
+    },
+    {
+      title: "Rendimiento",
+      cards: [
+        { title: 'Goles Favor', value: totalGoals, icon: TrendingUp, color: 'text-blue-600', bg: 'bg-blue-50' },
+        { title: 'Goles Contra', value: totalGoalsAgainst, icon: TrendingDown, color: 'text-orange-600', bg: 'bg-orange-50' },
+        { title: 'Asistencias', value: totalAssists, icon: Users, color: 'text-pink-600', bg: 'bg-pink-50' },
+      ]
+    },
+    {
+      title: "Rachas",
+      cards: [
+        { title: 'Victorias', value: winStreak, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+        { title: 'Empates', value: drawStreak, icon: Activity, color: 'text-gray-600', bg: 'bg-gray-50' },
+        { title: 'Derrotas', value: lossStreak, icon: TrendingDown, color: 'text-red-600', bg: 'bg-red-50' },
+      ]
+    },
+    {
+      title: "Salud y Disciplina",
+      cards: [
+        { title: 'Lesionados', value: currentlyInjured, icon: Bandage, color: 'text-red-500', bg: 'bg-red-50' },
+        { title: 'Amarillas', value: totalYellowCards, icon: Target, color: 'text-yellow-600', bg: 'bg-yellow-50' },
+        { title: 'Rojas', value: totalRedCards, icon: Target, color: 'text-red-700', bg: 'bg-red-100' },
+      ]
+    },
+    {
+      title: "General",
+      cards: [
+        { title: 'Part. Jugados', value: completedMatches.length, icon: Calendar, color: 'text-purple-600', bg: 'bg-purple-50' },
+        { title: 'Programados', value: scheduledMatches.length, icon: Clock, color: 'text-orange-600', bg: 'bg-orange-50' },
+        { title: 'Jugadores', value: filteredPlayers.length, icon: Users, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      ]
+    }
   ];
 
   const winRateData = [
@@ -463,29 +539,205 @@ export default function Dashboard({
         </div>
       </header>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2 md:gap-3">
-        {stats_cards.map((card, i) => (
-          <motion.div
-            key={card.title}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-          >
-            <Card className="border border-gray-100 shadow-sm hover:shadow-md hover:border-emerald-200 hover:bg-emerald-50/30 transition-all h-full cursor-default group">
-              <CardContent className="p-3 flex items-center justify-between gap-2 h-full">
-                <div className="flex flex-col items-start gap-1.5">
-                  <div className={cn("p-1.5 rounded-lg transition-colors", card.bg, "group-hover:bg-white")}>
-                    <card.icon className={card.color} size={16} />
+      {/* --- PANEL DEL ENTRENADOR --- */}
+      <div className="bg-gradient-to-br from-emerald-900 to-emerald-950 rounded-3xl p-6 text-white shadow-xl mb-8 relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+          <Shield size={200} />
+        </div>
+        
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2 bg-emerald-800/50 rounded-xl backdrop-blur-sm border border-emerald-700/50">
+              <Brain className="text-emerald-300" size={24} />
+            </div>
+            <div>
+              <h3 className="text-2xl font-black tracking-tight text-white">Panel del Entrenador</h3>
+              <p className="text-sm font-medium text-emerald-300/80">Vista rápida para la toma de decisiones.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Próxima Jornada */}
+            <div className="bg-emerald-950/40 border border-emerald-800/50 rounded-2xl p-5 backdrop-blur-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Próxima Jornada</span>
+                  {nextMatchInfo?.match && (
+                      <Badge className="bg-emerald-500/20 text-emerald-300 border-none hover:bg-emerald-500/30">
+                        {nextMatchInfo.match.type === 'league' ? `Jornada ${nextMatchInfo.match.round}` : nextMatchInfo.match.type === 'cup' ? 'Copa' : 'Amistoso'}
+                      </Badge>
+                  )}
+                </div>
+
+                {nextMatchInfo ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center p-2 border border-emerald-700/50">
+                        {nextMatchInfo.opponent?.shieldUrl ? (
+                          <img src={nextMatchInfo.opponent.shieldUrl} alt={nextMatchInfo.opponent.name} className="w-full h-full object-contain drop-shadow-md" />
+                        ) : (
+                          <Shield size={24} className="text-emerald-300/50" />
+                        )}
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-emerald-300/60 uppercase tracking-wider mb-0.5">Rival</p>
+                        <p className="font-bold text-lg leading-tight">{nextMatchInfo.opponent?.name || 'Por definir'}</p>
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-[10px] font-bold text-gray-500 uppercase leading-tight">{card.title}</p>
+                ) : (
+                  <div className="text-emerald-400/50 font-medium italic text-sm mt-4">
+                    No hay partidos programados.
+                  </div>
+                )}
+              </div>
+              
+              {nextMatchInfo && (
+                <div className="mt-6 pt-4 border-t border-emerald-800/50 flex flex-wrap gap-3">
+                  <div className="flex items-center gap-1.5 text-emerald-200">
+                    <Calendar size={14} className="text-emerald-400" />
+                    <span className="text-sm font-semibold">{format(new Date(nextMatchInfo.match.date), "d MMM, yyyy", { locale: es })}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-emerald-200">
+                    <Clock size={14} className="text-emerald-400" />
+                    <span className="text-sm font-semibold">{format(new Date(nextMatchInfo.match.date), "HH:mm")}</span>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <h3 className={cn("text-2xl font-black", card.color)}>{card.value}</h3>
+              )}
+            </div>
+
+            {/* Últimos 5 Resultados */}
+            <div className="bg-emerald-950/40 border border-emerald-800/50 rounded-2xl p-5 backdrop-blur-sm">
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-4 block">Forma (Últimos 5)</span>
+              {last5Matches.length > 0 ? (
+                <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between gap-2">
+                      {last5Matches.map((m, i) => (
+                        <div key={m.id} className="flex flex-col items-center gap-1.5 flex-1">
+                          <div className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shadow-inner border border-white/10",
+                            m.result === 'W' ? 'bg-emerald-500 text-white' :
+                            m.result === 'D' ? 'bg-gray-500 text-white' :
+                            'bg-red-500 text-white'
+                          )}>
+                            {m.result}
+                          </div>
+                          <span className="text-[9px] font-bold text-emerald-300/60 uppercase truncate max-w-[40px] text-center" title={m.opponentName}>
+                            {m.opponentName.substring(0, 3)}
+                          </span>
+                        </div>
+                      ))}
+                      {/* Fill empty spots if less than 5 */}
+                      {Array.from({ length: 5 - last5Matches.length }).map((_, i) => (
+                        <div key={`empty-${i}`} className="flex flex-col items-center gap-1.5 flex-1">
+                          <div className="w-8 h-8 rounded-full bg-emerald-900/50 border border-emerald-800/30 flex items-center justify-center">
+                            <span className="w-1 h-1 rounded-full bg-emerald-700/50"></span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 pt-3 border-t border-emerald-800/50">
+                        <p className="text-xs text-emerald-300/80 leading-relaxed font-medium">
+                            El equipo ha sumado <strong className="text-emerald-400">{last5Matches.filter(m=>m.result === 'W').length * 3 + last5Matches.filter(m=>m.result === 'D').length} puntos</strong> de los últimos {last5Matches.length * 3} posibles.
+                        </p>
+                    </div>
                 </div>
-              </CardContent>
-            </Card>
-          </motion.div>
+              ) : (
+                <div className="text-emerald-400/50 font-medium italic text-sm mt-4">
+                  Sin historial reciente.
+                </div>
+              )}
+            </div>
+
+            {/* Máximos Goleadores (Top 3) */}
+            <div className="bg-emerald-950/40 border border-emerald-800/50 rounded-2xl p-5 backdrop-blur-sm">
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-4 block">Máximos Goleadores</span>
+              <div className="space-y-3">
+                {playerGoals.slice(0, 3).map((p, i) => (
+                  <div key={p.id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-6 h-6 flex items-center justify-center font-black text-[10px] text-emerald-900 bg-emerald-400 rounded">
+                        {i + 1}
+                      </div>
+                      <span className="text-sm font-bold text-emerald-50 truncate max-w-[100px]">{p.name}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-emerald-900/80 px-2 py-1 rounded text-emerald-300">
+                      <Target size={12} />
+                      <span className="text-xs font-black">{p.goals}</span>
+                    </div>
+                  </div>
+                ))}
+                {playerGoals.length === 0 && (
+                  <div className="text-emerald-400/50 font-medium italic text-sm">Sin datos.</div>
+                )}
+              </div>
+            </div>
+
+            {/* Más Tarjetas (Top 3) */}
+            <div className="bg-emerald-950/40 border border-emerald-800/50 rounded-2xl p-5 backdrop-blur-sm">
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-4 block">Más Tarjetas (Alerta)</span>
+              <div className="space-y-3">
+                {playerCards.slice(0, 3).map((p, i) => (
+                  <div key={p.id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-6 h-6 flex items-center justify-center font-black text-[10px] text-red-950 bg-red-400 rounded">
+                        {i + 1}
+                      </div>
+                      <span className="text-sm font-bold text-emerald-50 truncate max-w-[90px]">{p.name}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                       {p.stats.yellow > 0 && (
+                           <div className="flex items-center text-[10px] font-black bg-yellow-400/20 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-400/30">
+                               {p.stats.yellow} <div className="w-2 h-3 bg-yellow-400 rounded-[1px] ml-1"></div>
+                           </div>
+                       )}
+                       {p.stats.red > 0 && (
+                           <div className="flex items-center text-[10px] font-black bg-red-400/20 text-red-400 px-1.5 py-0.5 rounded border border-red-400/30">
+                               {p.stats.red} <div className="w-2 h-3 bg-red-500 rounded-[1px] ml-1"></div>
+                           </div>
+                       )}
+                    </div>
+                  </div>
+                ))}
+                {playerCards.length === 0 && (
+                  <div className="text-emerald-400/50 font-medium italic text-sm">Equipo limpio.</div>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+      {/* --------------------------- */}
+
+      {/* Stats Navigation/Groups */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 md:gap-6">
+        {statGroups.map((group, idx) => (
+          <div key={group.title} className="bg-white p-4 rounded-3xl border border-gray-100 shadow-sm space-y-3 h-full">
+            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-50">
+                <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">{group.title}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+                {group.cards.map((card, i) => (
+                    <motion.div
+                        key={card.title}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: (idx * 0.1) + (i * 0.05) }}
+                    >
+                        <div className="group flex items-center justify-between p-2.5 rounded-2xl hover:bg-gray-50 transition-all border border-transparent hover:border-gray-100">
+                            <div className="flex items-center gap-3">
+                                <div className={cn("p-2 rounded-xl transition-colors", card.bg, "group-hover:bg-white group-hover:shadow-sm")}>
+                                    <card.icon className={card.color} size={14} />
+                                </div>
+                                <p className="text-[11px] font-bold text-gray-600">{card.title}</p>
+                            </div>
+                            <span className={cn("text-lg font-black", card.color)}>{card.value}</span>
+                        </div>
+                    </motion.div>
+                ))}
+            </div>
+          </div>
         ))}
       </div>
       
@@ -727,7 +979,12 @@ export default function Dashboard({
       )}
 
       {/* Top Players Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-8">
+      <div>
+        <div className="mt-8 mb-6">
+          <h3 className="text-xl font-bold tracking-tight opacity-90">Ránking de Jugadores</h3>
+          <p className="text-sm text-gray-500">Los jugadores más destacados y comprometidos.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-8">
         {/* Top Players by IR */}
         <LazyTopPlayersCard
           title="Top 8 Jugadores por Baremo"
@@ -882,6 +1139,7 @@ export default function Dashboard({
             </div>
           )}
         />
+      </div>
       </div>
 
     </div>
