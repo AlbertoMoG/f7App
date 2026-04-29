@@ -30,14 +30,15 @@ export function useSquadAnalysis({
 }: UseSquadAnalysisProps) {
   const [analyzedLimit, setAnalyzedLimit] = React.useState(5);
 
+  // Memoize synergyMap separately so it only recomputes when matches/stats change,
+  // not when allPlayerRatings or other deps change.
+  const synergyMap = React.useMemo(() => buildSynergyMap(matches, stats), [matches, stats]);
+
   const squadAnalysis = React.useMemo(() => {
     const analysisMap = new Map<string, SquadAnalysisResult>();
-    
-    // 1. Sinergias globales (O(M * P^2))
-    const synergyMap = buildSynergyMap(matches, stats);
 
-    // 2. Jugadores en racha (Simplificado para el ejemplo)
-    const inFormPlayers = new Set<string>(); // Aquí iría la lógica de racha
+    // 2. Jugadores en racha
+    const inFormPlayers = new Set<string>();
 
     // 3. Jugadores clave
     const keyPlayerIds = allPlayerRatings
@@ -91,7 +92,7 @@ export function useSquadAnalysis({
     });
 
     return analysisMap;
-  }, [players, playerSeasons, matches, stats, allPlayerRatings, globalSeasonId, leagueFixtures, standings]);
+  }, [players, playerSeasons, matches, stats, allPlayerRatings, globalSeasonId, leagueFixtures, standings, synergyMap]);
 
   return {
     squadAnalysis,

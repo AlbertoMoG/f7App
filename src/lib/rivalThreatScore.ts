@@ -25,6 +25,14 @@ export interface RivalThreatRow {
   streakLine: string | null;
   tableLine: string | null;
   ppgLine: string | null;
+  /** Numeric form trend (use instead of parsing formLine) */
+  formData: { attackTrend: number; defenseTrend: number; recentN: number } | null;
+  /** Numeric streak breakdown (use instead of parsing streakLine) */
+  streakData: { w: number; d: number; l: number; n: number } | null;
+  /** Numeric table stats (use instead of parsing tableLine) */
+  tableData: { pts: number; gf: number; ga: number } | null;
+  /** Numeric PPG data (use instead of parsing ppgLine) */
+  ppgData: { ppg: number; medianPpg: number } | null;
   hasUpcoming: boolean;
   /** `managed` = tu equipo gestionado; mismo esquema de columnas, score = ritmo competitivo. */
   rowKind?: 'rival' | 'managed';
@@ -222,13 +230,13 @@ function goalsOppInFixture(f: LeagueFixture, oppId: string): {
   return null;
 }
 
-/** Últimos partidos de liga neutra: racha tipo 2V-1E-0D */
-function leagueStreakLine(
+/** Últimos partidos de liga neutra: datos numéricos de racha */
+function leagueStreakData(
   oppId: string,
   seasonId: string,
   fixtures: LeagueFixture[],
   max = 5
-): string | null {
+): { w: number; d: number; l: number; n: number } | null {
   const rows = fixtures
     .filter(
       (f) =>
@@ -251,7 +259,13 @@ function leagueStreakLine(
     else if (r.draw) d++;
     else l++;
   }
-  return `${w}V-${d}E-${l}D (últ. ${rows.length})`;
+  return { w, d, l, n: rows.length };
+}
+
+function leagueStreakLine(oppId: string, seasonId: string, fixtures: LeagueFixture[], max = 5): string | null {
+  const data = leagueStreakData(oppId, seasonId, fixtures, max);
+  if (!data) return null;
+  return `${data.w}V-${data.d}E-${data.l}D (últ. ${data.n})`;
 }
 
 function collectRivalIds(
@@ -338,7 +352,7 @@ export function computeRivalThreatRows(
         (m.type === 'league' || m.type == null)
     );
 
-    let score = 46;
+    let score = 50;
     const reasons: string[] = [];
 
     if (h2h.played > 0) {
@@ -407,20 +421,32 @@ export function computeRivalThreatRows(
     const h2hRecord = `${h2h.w}V-${h2h.d}E-${h2h.l}D`;
 
     let formLine: string | null = null;
+    let formData: RivalThreatRow['formData'] = null;
     if (form.sampleGames >= 2) {
       formLine = `Ataque ${form.attackTrend >= 1 ? '↑' : '↓'} · Encaje ${form.defenseTrend >= 1 ? '↑' : '↓'} (${form.recentN} últ.)`;
+      formData = { attackTrend: form.attackTrend, defenseTrend: form.defenseTrend, recentN: form.recentN };
     }
 
-    const streakLine = leagueStreakLine(opponentId, seasonId, leagueFixtures);
+    const rawStreakData = leagueStreakData(opponentId, seasonId, leagueFixtures);
+    const streakLine = rawStreakData ? `${rawStreakData.w}V-${rawStreakData.d}E-${rawStreakData.l}D (últ. ${rawStreakData.n})` : null;
 
     let tableLine: string | null = standingsOrAggregateTableLine(
       oppStand,
       leagueStandingsAgg.get(opponentId)
     );
+    let tableData: RivalThreatRow['tableData'] = null;
+    if (oppStand && oppStand.played > 0) {
+      tableData = { pts: oppStand.points ?? 0, gf: oppStand.goalsFor ?? 0, ga: oppStand.goalsAgainst ?? 0 };
+    } else {
+      const agg = leagueStandingsAgg.get(opponentId);
+      if (agg && agg.played > 0) tableData = { pts: agg.points, gf: agg.goalsFor, ga: agg.goalsAgainst };
+    }
 
     let ppgLine: string | null = null;
+    let ppgData: RivalThreatRow['ppgData'] = null;
     if (medianPpg > 0.05) {
       ppgLine = `PPG ${ppg.toFixed(2)} (mediana grupo ${medianPpg.toFixed(2)})`;
+      ppgData = { ppg, medianPpg };
     }
 
     rows.push({
@@ -438,6 +464,10 @@ export function computeRivalThreatRows(
       streakLine,
       tableLine,
       ppgLine,
+      formData,
+      streakData: rawStreakData,
+      tableData,
+      ppgData,
       hasUpcoming,
     });
   }
@@ -532,16 +562,35 @@ export function computeMyTeamThreatRow(
     agg.played > 0 ? `${agg.w}V-${agg.d}E-${agg.l}D` : '—';
 
   let formLine: string | null = null;
+  let formData: RivalThreatRow['formData'] = null;
   if (formSignals && formSignals.samples >= 2) {
     formLine = `Ataque ${formSignals.attackTrend >= 1 ? '↑' : '↓'} · Encaje ${formSignals.defenseTrend >= 1 ? '↑' : '↓'} (${formSignals.recentN} últ.)`;
+    formData = { attackTrend: formSignals.attackTrend, defenseTrend: formSignals.defenseTrend, recentN: formSignals.recentN };
   }
 
   const tableLine = standingsOrAggregateTableLine(myEntry, leagueStandingsAgg.get('my-team'));
+  let tableData: RivalThreatRow['tableData'] = null;
+  if (myEntry && myEntry.played > 0) {
+    tableData = { pts: myEntry.points ?? 0, gf: myEntry.goalsFor ?? 0, ga: myEntry.goalsAgainst ?? 0 };
+  } else {
+    const agg2 = leagueStandingsAgg.get('my-team');
+    if (agg2 && agg2.played > 0) tableData = { pts: agg2.points, gf: agg2.goalsFor, ga: agg2.goalsAgainst };
+  }
 
   let ppgLine: string | null = null;
+  let ppgData: RivalThreatRow['ppgData'] = null;
   if (medianPpg > 0.05) {
     ppgLine = `PPG ${myPpg.toFixed(2)} (mediana grupo ${medianPpg.toFixed(2)})`;
+    ppgData = { ppg: myPpg, medianPpg };
   }
+
+  const myStreakStr = leagueMatchStreakMyTeamLine(matches, seasonId, team.id);
+  const myStreakData: RivalThreatRow['streakData'] = myStreakStr
+    ? (() => {
+        const m = myStreakStr.match(/^(\d+)V-(\d+)E-(\d+)D \(últ\. (\d+)\)$/);
+        return m ? { w: +m[1], d: +m[2], l: +m[3], n: +m[4] } : null;
+      })()
+    : null;
 
   return {
     opponentId: 'my-team',
@@ -555,9 +604,13 @@ export function computeMyTeamThreatRow(
     h2hGf: agg.gf,
     h2hGa: agg.ga,
     formLine,
-    streakLine: leagueMatchStreakMyTeamLine(matches, seasonId, team.id),
+    streakLine: myStreakStr,
     tableLine,
     ppgLine,
+    formData,
+    streakData: myStreakData,
+    tableData,
+    ppgData,
     hasUpcoming,
     rowKind: 'managed',
   };

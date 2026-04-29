@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Swords, Info, CalendarClock } from 'lucide-react';
+import { Swords, Info, CalendarClock, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,
@@ -18,49 +18,9 @@ import {
 import type { RivalThreatRow } from '../hooks/useRivalThreatAnalysis';
 import { cn } from '@/lib/utils';
 
-/** `PPG 1.20 (mediana grupo 1.50)` desde rivalThreatScore */
-function parsePpgLine(line: string | null): {
-  primary: number;
-  median?: number;
-} | null {
-  if (!line) return null;
-  const m = line.match(/^PPG\s+([\d.]+)\s*\(\s*mediana grupo\s+([\d.]+)\s*\)$/i);
-  if (!m || m[1] == null || m[2] == null) return null;
-  return { primary: Number(m[1]), median: Number(m[2]) };
-}
+type SortKey = 'threatScore' | 'ppg' | 'tablePts' | 'h2hPlayed';
+type SortDir = 'asc' | 'desc';
 
-/** `12 pts · 8-4 GF-GC` desde rivalThreatScore */
-function parseTableLine(line: string | null): {
-  pts: number;
-  gf: number;
-  ga: number;
-} | null {
-  if (!line) return null;
-  const m = line.match(/^(\d+)\s*pts\s*·\s*(\d+)\s*-\s*(\d+)\s+GF-GC\s*$/i);
-  if (!m || m[1] == null || m[2] == null || m[3] == null) return null;
-  return { pts: Number(m[1]), gf: Number(m[2]), ga: Number(m[3]) };
-}
-
-/** `3V-1E-2D (últ. 5)` para chips de resultado */
-function parseStreakPrefix(line: string | null): {
-  vd: number;
-  ed: number;
-  ld: number;
-  restLabel: string;
-} | null {
-  if (!line) return null;
-  const idx = line.indexOf('(');
-  const head = idx >= 0 ? line.slice(0, idx).trim() : line.trim();
-  const restLabel = idx >= 0 ? line.slice(idx).trim() : '';
-  const m = head.match(/^(\d+)V-(\d+)E-(\d+)D\s*$/i);
-  if (!m || m[1] == null || m[2] == null || m[3] == null) return null;
-  return {
-    vd: Number(m[1]),
-    ed: Number(m[2]),
-    ld: Number(m[3]),
-    restLabel,
-  };
-}
 
 function scoreBarToneClass(isManaged: boolean, level: RivalThreatRow['level']): string {
   if (isManaged) {
@@ -84,7 +44,21 @@ function levelBadgeClass(level: RivalThreatRow['level'], kind?: RivalThreatRow['
   return 'bg-emerald-100 text-emerald-800 border-emerald-200';
 }
 
-function AnalysisColumnsHeader({ headerTone }: { headerTone: 'rose' | 'emerald' }) {
+interface ColumnsHeaderProps {
+  headerTone: 'rose' | 'emerald';
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+}
+
+function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
+  if (!active) return <ArrowUpDown className="h-3 w-3 opacity-30 ml-0.5" />;
+  return dir === 'desc'
+    ? <ArrowDown className="h-3 w-3 opacity-80 ml-0.5" />
+    : <ArrowUp className="h-3 w-3 opacity-80 ml-0.5" />;
+}
+
+function AnalysisColumnsHeader({ headerTone, sortKey, sortDir, onSort }: ColumnsHeaderProps) {
   const th = cn(
     'align-top whitespace-normal',
     headerTone === 'rose'
@@ -97,14 +71,19 @@ function AnalysisColumnsHeader({ headerTone }: { headerTone: 'rose' | 'emerald' 
     className,
     tip,
     alignCenter,
+    sortable,
   }: {
     children: React.ReactNode;
     className?: string;
     tip: string;
     alignCenter?: boolean;
+    sortable?: SortKey;
   }) {
     return (
-      <TableHead className={cn(className, th)}>
+      <TableHead
+        className={cn(className, th, sortable && 'cursor-pointer select-none')}
+        onClick={sortable ? () => onSort(sortable) : undefined}
+      >
         <div
           className={cn(
             'flex items-start gap-1 min-h-[1.25rem]',
@@ -112,29 +91,33 @@ function AnalysisColumnsHeader({ headerTone }: { headerTone: 'rose' | 'emerald' 
           )}
         >
           {children}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  className={cn(
-                    'shrink-0 mt-0.5 inline-flex rounded-full p-0.5 text-muted-foreground hover:bg-black/5',
-                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                  )}
-                  aria-label="Detalle de columna"
-                >
-                  <Info className="h-3 w-3 opacity-80" />
-                </button>
-              }
-            />
-            <TooltipContent
-              side="top"
-              align="start"
-              className="max-w-[280px] px-3 py-2 text-xs leading-snug z-50"
-            >
-              {tip}
-            </TooltipContent>
-          </Tooltip>
+          {sortable ? (
+            <SortIcon active={sortKey === sortable} dir={sortDir} />
+          ) : (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    className={cn(
+                      'shrink-0 mt-0.5 inline-flex rounded-full p-0.5 text-muted-foreground hover:bg-black/5',
+                      'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                    )}
+                    aria-label="Detalle de columna"
+                  >
+                    <Info className="h-3 w-3 opacity-80" />
+                  </button>
+                }
+              />
+              <TooltipContent
+                side="top"
+                align="start"
+                className="max-w-[280px] px-3 py-2 text-xs leading-snug z-50"
+              >
+                {tip}
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </TableHead>
     );
@@ -143,20 +126,12 @@ function AnalysisColumnsHeader({ headerTone }: { headerTone: 'rose' | 'emerald' 
   const tips = {
     equipo:
       'Club analizado: puede ser un rival de la temporada o tu propio equipo en la segunda tabla.',
-    peligro:
-      'Para rivales: índice de peligro para tu club. Para tu equipo: ritmo competitivo (0–100) según resultados y contexto, no “amenaza de rival”.',
     factores:
       'Argumentos calculados detrás del índice: H2H, forma del grupo vs la mediana de puntos/goles por partido, próximo duelo cuando aplica.',
-    ppg:
-      'Puntos por partido del club frente al ritmo medio del grupo (mediana PPG cuando aplica).',
-    liga:
-      'En rivales: enfrentamientos directos en liga contra tu equipo (marcador y registro). En tu fila: suma de todos tus partidos de liga de la temporada contra rivales.',
     forma:
       'Para rivales: tendencia reciente en partidos entre equipos del grupo. Para tu equipo: tendencia sobre tus últimos partidos de liga registrados.',
     racha:
       'Últimos resultados de liga, del más reciente al más antiguo en la ventana usada.',
-    tabla:
-      'Puntos y goles desde la clasificación guardada si existe; si no, calculado desde partidos de «Mis partidos» y enfrentamientos del grupo.',
     proximo:
       'Si hay encuentro programado pendiente contra ese rival en liga (o contra algún rival en tu caso en gestión).',
   };
@@ -167,17 +142,17 @@ function AnalysisColumnsHeader({ headerTone }: { headerTone: 'rose' | 'emerald' 
         <Hint className={cn('min-w-[10rem]', th)} tip={tips.equipo}>
           <span>Equipo</span>
         </Hint>
-        <Hint className={cn('text-center w-24', th)} tip={tips.peligro} alignCenter>
-          <span>Peligro / ritmo</span>
+        <Hint className={cn('text-center w-24', th)} tip="Índice de peligro/ritmo" alignCenter sortable="threatScore">
+          <span>Peligro</span>
         </Hint>
         <Hint className={cn('min-w-[13rem] max-w-[18rem]', th)} tip={tips.factores}>
           <span>Factores</span>
         </Hint>
-        <Hint className={cn('text-center w-[8rem]', th)} tip={tips.ppg} alignCenter>
-          <span>PPG / grupo</span>
+        <Hint className={cn('text-center w-[8rem]', th)} tip="Puntos por partido vs mediana del grupo" alignCenter sortable="ppg">
+          <span>PPG</span>
         </Hint>
-        <Hint className={cn('min-w-[7rem]', th)} tip={tips.liga}>
-          <span>Liga (H2H o total)</span>
+        <Hint className={cn('min-w-[7rem]', th)} tip="Enfrentamientos H2H en liga" sortable="h2hPlayed">
+          <span>Liga H2H</span>
         </Hint>
         <Hint className={cn('min-w-[9rem]', th)} tip={tips.forma}>
           <span>Forma</span>
@@ -185,7 +160,7 @@ function AnalysisColumnsHeader({ headerTone }: { headerTone: 'rose' | 'emerald' 
         <Hint className={cn('min-w-[6rem]', th)} tip={tips.racha}>
           <span>Racha</span>
         </Hint>
-        <Hint className={cn('min-w-[8rem]', th)} tip={tips.tabla}>
+        <Hint className={cn('min-w-[8rem]', th)} tip="Puntos y GF/GC en tabla" sortable="tablePts">
           <span>Tabla</span>
         </Hint>
         <Hint className={cn('text-center w-24', th)} tip={tips.proximo} alignCenter>
@@ -205,9 +180,9 @@ interface RivalsAnalysisTabProps {
 
 function ThreatTableRow({ row, stripeMuted }: { row: RivalThreatRow; stripeMuted?: boolean }) {
   const isManaged = row.rowKind === 'managed';
-  const ppgParsed = parsePpgLine(row.ppgLine ?? null);
-  const tableParsed = parseTableLine(row.tableLine ?? null);
-  const streakParsed = parseStreakPrefix(row.streakLine ?? null);
+  const ppgParsed = row.ppgData ?? null;
+  const tableParsed = row.tableData ?? null;
+  const streakParsed = row.streakData ? { vd: row.streakData.w, ed: row.streakData.d, ld: row.streakData.l, restLabel: `(últ. ${row.streakData.n})` } : null;
 
   return (
     <TableRow
@@ -306,23 +281,17 @@ function ThreatTableRow({ row, stripeMuted }: { row: RivalThreatRow; stripeMuted
           <div className="flex flex-col items-center gap-1.5">
             <div className="flex items-baseline justify-center gap-1">
               <span className="text-2xl font-bold tabular-nums text-foreground leading-none">
-                {ppgParsed.primary.toFixed(2)}
+                {ppgParsed.ppg.toFixed(2)}
               </span>
               <span className="text-[10px] text-muted-foreground font-medium uppercase">PPG</span>
             </div>
-            {ppgParsed.median != null ? (
-              <Badge
-                variant="secondary"
-                className="tabular-nums text-[10px] font-semibold px-2 py-0.5 bg-muted/70 text-muted-foreground border-0"
-              >
-                med. grupo {ppgParsed.median.toFixed(2)}
-              </Badge>
-            ) : null}
+            <Badge
+              variant="secondary"
+              className="tabular-nums text-[10px] font-semibold px-2 py-0.5 bg-muted/70 text-muted-foreground border-0"
+            >
+              med. grupo {ppgParsed.medianPpg.toFixed(2)}
+            </Badge>
           </div>
-        ) : row.ppgLine ? (
-          <span className="text-xs leading-snug text-muted-foreground block max-w-[9rem] mx-auto">
-            {row.ppgLine}
-          </span>
         ) : (
           <span className="text-xs italic text-muted-foreground/75">Sin PPG</span>
         )}
@@ -438,6 +407,30 @@ export function RivalsAnalysisTab({
   seasonLabel,
   isAllSeasonsNote,
 }: RivalsAnalysisTabProps) {
+  const [sortKey, setSortKey] = React.useState<SortKey>('threatScore');
+  const [sortDir, setSortDir] = React.useState<SortDir>('desc');
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
+
+  const sortedRows = React.useMemo(() => {
+    const sign = sortDir === 'desc' ? -1 : 1;
+    return [...rows].sort((a, b) => {
+      switch (sortKey) {
+        case 'ppg':      return sign * ((a.ppgData?.ppg ?? 0) - (b.ppgData?.ppg ?? 0));
+        case 'tablePts': return sign * ((a.tableData?.pts ?? 0) - (b.tableData?.pts ?? 0));
+        case 'h2hPlayed': return sign * (a.h2hPlayed - b.h2hPlayed);
+        default:         return sign * (a.threatScore - b.threatScore);
+      }
+    });
+  }, [rows, sortKey, sortDir]);
+
   if (rows.length === 0 && !managedTeamRow) {
     return (
       <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
@@ -489,7 +482,7 @@ export function RivalsAnalysisTab({
               {isAllSeasonsNote ? (
                 <span className="text-amber-700/90">
                   {' '}
-                  (filtro “todas”; se usa la temporada más reciente para este análisis)
+                  (filtro "todas"; se usa la temporada más reciente para este análisis)
                 </span>
               ) : null}
             </CardDescription>
@@ -498,15 +491,15 @@ export function RivalsAnalysisTab({
       </CardHeader>
       <CardContent className="p-0 overflow-x-auto">
         <div className="divide-y divide-border">
-          {rows.length > 0 ? (
+          {sortedRows.length > 0 ? (
             <>
               <p className="px-4 py-2 text-xs font-semibold text-rose-900/90 bg-rose-50/35 border-b border-rose-100/70">
-                Rivales ({rows.length})
+                Rivales ({sortedRows.length})
               </p>
               <Table>
-                <AnalysisColumnsHeader headerTone="rose" />
+                <AnalysisColumnsHeader headerTone="rose" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <TableBody>
-                  {rows.map((row, idx) => (
+                  {sortedRows.map((row, idx) => (
                     <ThreatTableRow
                       key={row.opponentId}
                       row={row}
@@ -547,7 +540,7 @@ export function RivalsAnalysisTab({
                 </div>
               </div>
               <Table>
-                <AnalysisColumnsHeader headerTone="emerald" />
+                <AnalysisColumnsHeader headerTone="emerald" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
                 <TableBody>
                   <ThreatTableRow row={managedTeamRow} />
                 </TableBody>

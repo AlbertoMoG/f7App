@@ -7,8 +7,18 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ClipboardCheck, Users, Shield, Calendar, ExternalLink, Plus, Info } from 'lucide-react';
+import { Users, Shield, Calendar, ExternalLink, Plus } from 'lucide-react';
 import { GRADE_COLORS } from '../../../lib/predictionConstants';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+} from 'recharts';
 
 interface SquadsTabProps {
   analyzedMatches: Match[];
@@ -36,6 +46,20 @@ export const SquadsTab = React.memo(function SquadsTab({
   filteredMatchesCount
 }: SquadsTabProps) {
   const [viewMode, setViewMode] = React.useState<'table' | 'cards'>('table');
+
+  const chartData = React.useMemo(() => {
+    return [...analyzedMatches]
+      .reverse()
+      .map((match) => {
+        const analysis = squadAnalysis.get(match.id);
+        return {
+          label: `J${match.round}`,
+          score: analysis?.score ?? null,
+          grade: analysis?.grade ?? null,
+        };
+      })
+      .filter((d): d is typeof d & { score: number } => d.score != null);
+  }, [analyzedMatches, squadAnalysis]);
 
   return (
     <div className="space-y-6">
@@ -65,6 +89,34 @@ export const SquadsTab = React.memo(function SquadsTab({
            </Button>
         </div>
       </div>
+
+      {chartData.length >= 3 && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-4">Evolución del Baremo por Jornada</p>
+          <ResponsiveContainer width="100%" height={140}>
+            <LineChart data={chartData} margin={{ top: 4, right: 16, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 9, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
+              <RechartsTooltip
+                contentStyle={{ fontSize: 11, borderRadius: 12, border: '1px solid #e5e7eb', boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }}
+                formatter={(v: number) => [`${v}/100`, 'Baremo']}
+              />
+              <ReferenceLine y={75} stroke="#e5e7eb" strokeDasharray="4 4" label={{ value: 'A', position: 'right', fontSize: 9, fill: '#10b981' }} />
+              <ReferenceLine y={50} stroke="#f0f0f0" strokeDasharray="4 4" />
+              <Line
+                type="monotone"
+                dataKey="score"
+                stroke="#10b981"
+                strokeWidth={2}
+                dot={{ r: 3, fill: '#10b981', strokeWidth: 0 }}
+                activeDot={{ r: 5 }}
+                connectNulls
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       {viewMode === 'table' ? (
         <div className="overflow-x-auto -mx-6 px-6">

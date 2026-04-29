@@ -27,17 +27,29 @@ export const PESO_COMPROMISO = 0.55;
 export const PESO_DESEMPENO = 0.45;
 export const META_EXCELENCIA = 100;
 export const BONO_REGULARIDAD_PUNTOS = 8;
-export const BONO_REGULARIDAD_RACHA = 3;
+export const BONO_REGULARIDAD_RACHA = 5;
 export const PENALIZACION_REGULARIDAD_PUNTOS = 8;
-export const PENALIZACION_REGULARIDAD_RACHA = 5;
-export const PUNTOS_VICTORIA = 120;
-export const PUNTOS_EMPATE = 50;
-export const PUNTOS_DERROTA = 15;
-export const PUNTOS_BAJO_4_GOLES = 40;
+export const PENALIZACION_REGULARIDAD_RACHA = 3;
+export const PUNTOS_VICTORIA = 100;
+export const PUNTOS_EMPATE = 45;
+export const PUNTOS_DERROTA = 25;
+export const PUNTOS_PORTERIA_CERO  = 70;
+export const PUNTOS_DEFENSA_SOLIDA = 35;
+export const PUNTOS_DEFENSA_DECENTE = 12;
 export const PUNTOS_GOL = 80;
 export const PUNTOS_ASISTENCIA = 40;
+
+function getPositionMultipliers(position: string): { goal: number; assist: number; bajo4: number } {
+  switch (position) {
+    case 'Portero':   return { goal: 1.5, assist: 1.0, bajo4: 1.25 };
+    case 'Defensa':   return { goal: 1.2, assist: 1.1, bajo4: 1.0 };
+    case 'Medio':     return { goal: 1.0, assist: 1.2, bajo4: 0 };
+    case 'Delantero': return { goal: 1.0, assist: 1.0, bajo4: 0 };
+    default:          return { goal: 1.0, assist: 1.0, bajo4: 0 };
+  }
+}
 export const PUNTOS_AMARILLA = -20;
-export const PUNTOS_ROJA = -40;
+export const PUNTOS_ROJA = -80;
 export const PUNTOS_SIN_CONTESTAR = -10;
 export const PUNTOS_NO_ASISTENCIA = -1.5;
 
@@ -164,32 +176,40 @@ export function calculatePlayerRating(
     const penalizacionNoAsistencia = noAsistencias * PUNTOS_NO_ASISTENCIA;
     // Las lesiones cuentan como un 80% de asistencia (pequeña penalización frente a los que juegan)
     // Las ausencias justificadas cuentan como un 100% de asistencia (sin penalización)
-    asistenciaEfectiva = partidosAsistidos + (partidosLesionado * 0.8) + partidosJustificados;
+    asistenciaEfectiva = partidosAsistidos + (partidosLesionado * 0.8) + (partidosJustificados * 0.9);
     notaCompromiso = Math.max(0, Math.min(100, Math.round(((asistenciaEfectiva / partidosComputables) * 100) + penalizacionNoContestar + penalizacionNoAsistencia)));
   }
 
   // 5. Calcular Media de Desempeño
   let puntosTotales = 0;
+  const posMults = getPositionMultipliers(player.position);
   stats.forEach(s => {
     if (s.attendance === 'attending') {
       const match = matches.find(m => m.id === s.matchId);
       if (match && match.status === 'completed') {
         const teamScore = match.scoreTeam || 0;
         const opponentScore = match.scoreOpponent || 0;
-        
-        if (teamScore > opponentScore) puntosTotales += PUNTOS_VICTORIA; // Victoria
-        else if (teamScore === opponentScore) puntosTotales += PUNTOS_EMPATE; // Empate
-        else puntosTotales += PUNTOS_DERROTA; // Derrota
 
-        // Plus para porteros y defensas: Menos de 4 goles recibidos
-        if ((player.position === 'Portero' || player.position === 'Defensa') && opponentScore < 4) {
-          puntosTotales += PUNTOS_BAJO_4_GOLES;
-          partidosBajo4Goles++;
+        if (teamScore > opponentScore) puntosTotales += PUNTOS_VICTORIA;
+        else if (teamScore === opponentScore) puntosTotales += PUNTOS_EMPATE;
+        else puntosTotales += PUNTOS_DERROTA;
+
+        if (player.position === 'Portero' || player.position === 'Defensa') {
+          if (opponentScore === 0) {
+            puntosTotales += PUNTOS_PORTERIA_CERO * posMults.bajo4;
+            partidosBajo4Goles++;
+          } else if (opponentScore === 1) {
+            puntosTotales += PUNTOS_DEFENSA_SOLIDA * posMults.bajo4;
+            partidosBajo4Goles++;
+          } else if (opponentScore === 2) {
+            puntosTotales += PUNTOS_DEFENSA_DECENTE * posMults.bajo4;
+            partidosBajo4Goles++;
+          }
         }
       }
-      
-      puntosTotales += (s.goals || 0) * PUNTOS_GOL;
-      puntosTotales += (s.assists || 0) * PUNTOS_ASISTENCIA;
+
+      puntosTotales += (s.goals || 0) * PUNTOS_GOL * posMults.goal;
+      puntosTotales += (s.assists || 0) * PUNTOS_ASISTENCIA * posMults.assist;
       puntosTotales += (s.yellowCards || 0) * PUNTOS_AMARILLA;
       puntosTotales += (s.redCards || 0) * PUNTOS_ROJA;
     }

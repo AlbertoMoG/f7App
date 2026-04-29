@@ -23,7 +23,9 @@ import {
   PUNTOS_VICTORIA, 
   PUNTOS_EMPATE, 
   PUNTOS_DERROTA, 
-  PUNTOS_BAJO_4_GOLES, 
+  PUNTOS_PORTERIA_CERO,
+  PUNTOS_DEFENSA_SOLIDA,
+  PUNTOS_DEFENSA_DECENTE,
   PUNTOS_GOL, 
   PUNTOS_ASISTENCIA, 
   PUNTOS_AMARILLA, 
@@ -509,7 +511,7 @@ export default function PlayerProfile() {
                                     </div>
                                     {(player.position === 'Portero' || player.position === 'Defensa') && (
                                        <div className="flex justify-between text-[10px]">
-                                         <span className="text-gray-400 italic">Bono Defensivo (&lt; 4 Gls):</span>
+                                         <span className="text-gray-400 italic">Bonus Defensivo (0-2 gols):</span>
                                          <span className="font-medium text-emerald-400">{rating.partidosBajo4Goles}</span>
                                        </div>
                                     )}

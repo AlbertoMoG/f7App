@@ -100,8 +100,10 @@ export function usePredictions({
       ? allPlayerRatings.reduce((acc, p) => acc + p.rating, 0) / allPlayerRatings.length 
       : 70;
 
-    const globalAvgGF = allMatchesWithScores.length > 0 ? allMatchesWithScores.reduce((acc, m) => acc + (m.scoreTeam || 0), 0) / allMatchesWithScores.length : 1.5;
-    const globalAvgGC = allMatchesWithScores.length > 0 ? allMatchesWithScores.reduce((acc, m) => acc + (m.scoreOpponent || 0), 0) / allMatchesWithScores.length : 1.5;
+    const leagueMatchesWithScores = allMatchesWithScores.filter(m => m.type === 'league');
+    const baselineMatches = leagueMatchesWithScores.length > 0 ? leagueMatchesWithScores : allMatchesWithScores;
+    const globalAvgGF = baselineMatches.length > 0 ? baselineMatches.reduce((acc, m) => acc + (m.scoreTeam || 0), 0) / baselineMatches.length : 1.5;
+    const globalAvgGC = baselineMatches.length > 0 ? baselineMatches.reduce((acc, m) => acc + (m.scoreOpponent || 0), 0) / baselineMatches.length : 1.5;
 
     // Momentum (Racha últimos 3 partidos)
     const recentMatches = sortedCompleted.slice(0, 3);
@@ -131,10 +133,11 @@ export function usePredictions({
 
       // 1. Histórico H2H (Base de la predicción)
       if (vsOppMatches.length > 0) {
+        const h2hWeight = Math.min(0.6, vsOppMatches.length * 0.15);
         const h2hAvgGF = vsOppMatches.reduce((acc, m) => acc + (m.scoreTeam || 0), 0) / vsOppMatches.length;
         const h2hAvgGC = vsOppMatches.reduce((acc, m) => acc + (m.scoreOpponent || 0), 0) / vsOppMatches.length;
-        predGF = (predGF * 0.4) + (h2hAvgGF * 0.6);
-        predGC = (predGC * 0.4) + (h2hAvgGC * 0.6);
+        predGF = predGF * (1 - h2hWeight) + h2hAvgGF * h2hWeight;
+        predGC = predGC * (1 - h2hWeight) + h2hAvgGC * h2hWeight;
         reasons.push(`Basado en ${vsOppMatches.length} enfrentamientos previos.`);
       }
 
@@ -265,16 +268,23 @@ export function usePredictions({
           lossProb = (lossProb / totalProb) * 100;
       }
 
-      // Mejor equipo posible (Sugerido)
-      const recommendedSquad = players.filter(p => 
+      // Mejor equipo posible con restricciones posicionales (1 GK + 2 DEF mínimo)
+      const sortedEligible = players.filter(p =>
         playerSeasons.some(ps => ps.playerId === p.id && ps.seasonId === match.seasonId) &&
         !injuries.some(inj => inj.playerId === p.id && !inj.endDate)
       ).sort((a, b) => {
         const ra = allPlayerRatings.find(r => r.id === a.id)?.rating || 0;
         const rb = allPlayerRatings.find(r => r.id === b.id)?.rating || 0;
         return rb - ra;
-      }).slice(0, 10)
-      .sort((a, b) => (posOrder[a.position] || 9) - (posOrder[b.position] || 9));
+      });
+      const squadSet = new Set<string>();
+      const topGk = sortedEligible.find(p => p.position === 'Portero');
+      if (topGk) squadSet.add(topGk.id);
+      sortedEligible.filter(p => p.position === 'Defensa').slice(0, 2).forEach(p => squadSet.add(p.id));
+      sortedEligible.forEach(p => { if (squadSet.size < 10) squadSet.add(p.id); });
+      const recommendedSquad = sortedEligible
+        .filter(p => squadSet.has(p.id))
+        .sort((a, b) => (posOrder[a.position] || 9) - (posOrder[b.position] || 9));
 
       const recSquadAvgBaremo = recommendedSquad.length > 0 
         ? recommendedSquad.reduce((acc, p) => acc + (allPlayerRatings.find(pr => pr.id === p.id)?.rating || teamAvgBaremo), 0) / recommendedSquad.length 

@@ -81,11 +81,14 @@ import {
   PESO_COMPROMISO, 
   PESO_DESEMPENO, 
   META_EXCELENCIA, 
-  BONO_REGULARIDAD_PUNTOS, 
+  BONO_REGULARIDAD_PUNTOS,
+  BONO_REGULARIDAD_RACHA,
   PUNTOS_VICTORIA, 
   PUNTOS_EMPATE, 
   PUNTOS_DERROTA, 
-  PUNTOS_BAJO_4_GOLES, 
+  PUNTOS_PORTERIA_CERO,
+  PUNTOS_DEFENSA_SOLIDA,
+  PUNTOS_DEFENSA_DECENTE,
   PUNTOS_GOL, 
   PUNTOS_ASISTENCIA, 
   PUNTOS_AMARILLA, 
@@ -154,7 +157,9 @@ const BAREMO_CONFIG = {
     WIN: PUNTOS_VICTORIA,
     DRAW: PUNTOS_EMPATE,
     LOSS: PUNTOS_DERROTA,
-    UNDER_4_GOALS: PUNTOS_BAJO_4_GOLES,
+    CLEAN_SHEET: PUNTOS_PORTERIA_CERO,
+    SOLID_DEF: PUNTOS_DEFENSA_SOLIDA,
+    DECENT_DEF: PUNTOS_DEFENSA_DECENTE,
     GOAL: PUNTOS_GOL,
     ASSIST: PUNTOS_ASISTENCIA,
     YELLOW: PUNTOS_AMARILLA,
@@ -1686,7 +1691,9 @@ React.useEffect(() => {
                                   <li className="flex justify-between"><span>Victoria:</span> <span className="font-bold text-emerald-400">+{BAREMO_CONFIG.POINTS.WIN} pts</span></li>
                                   <li className="flex justify-between"><span>Empate:</span> <span className="font-bold text-emerald-400">+{BAREMO_CONFIG.POINTS.DRAW} pts</span></li>
                                   <li className="flex justify-between"><span>Derrota:</span> <span className="font-bold text-emerald-400">+{BAREMO_CONFIG.POINTS.LOSS} pts</span></li>
-                                  <li className="flex justify-between"><span>Bono Def. (&lt; 4 Gls):</span> <span className="font-bold text-emerald-400">+{BAREMO_CONFIG.POINTS.UNDER_4_GOALS} pts</span></li>
+                                  <li className="flex justify-between"><span>Portería a cero:</span> <span className="font-bold text-emerald-400">+{BAREMO_CONFIG.POINTS.CLEAN_SHEET} pts</span></li>
+                                  <li className="flex justify-between"><span>Def. sólida (1 gol):</span> <span className="font-bold text-emerald-400">+{BAREMO_CONFIG.POINTS.SOLID_DEF} pts</span></li>
+                                  <li className="flex justify-between"><span>Def. decente (2 gols):</span> <span className="font-bold text-emerald-400">+{BAREMO_CONFIG.POINTS.DECENT_DEF} pts</span></li>
                                   <li className="flex justify-between"><span>Gol:</span> <span className="font-bold text-emerald-400">+{BAREMO_CONFIG.POINTS.GOAL} pts</span></li>
                                   <li className="flex justify-between"><span>Asistencia:</span> <span className="font-bold text-emerald-400">+{BAREMO_CONFIG.POINTS.ASSIST} pts</span></li>
                                   <li className="flex justify-between"><span>Amarilla:</span> <span className="font-bold text-red-400">{BAREMO_CONFIG.POINTS.YELLOW} pts</span></li>
@@ -1695,7 +1702,7 @@ React.useEffect(() => {
                               </div>
 
                               <p className="pt-2 border-t border-white/10 text-[10px] text-gray-400 italic">
-                                Nota Final = (Compromiso × {BAREMO_CONFIG.WEIGHT_COMMITMENT}) + (Desempeño × {BAREMO_CONFIG.WEIGHT_PERFORMANCE}) + Bono Regularidad ({BAREMO_CONFIG.REGULARITY_BONUS} pts / 3 partidos)
+                                Nota Final = (Compromiso × {BAREMO_CONFIG.WEIGHT_COMMITMENT}) + (Desempeño × {BAREMO_CONFIG.WEIGHT_PERFORMANCE}) + Bono Regularidad ({BAREMO_CONFIG.REGULARITY_BONUS} pts / {BONO_REGULARIDAD_RACHA} partidos)
                               </p>
                             </div>
                           </TooltipContent>

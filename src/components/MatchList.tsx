@@ -95,7 +95,7 @@ interface MatchListProps {
   opponents: Opponent[];
   fields: Field[];
   onUpdateMatch: (match: Match) => void;
-  onDeleteMatch: (id: string) => void;
+  onDeleteMatch: (id: string) => Promise<void>;
   onUpdateStats: (stats: PlayerStat[]) => void;
   lineups: Lineup[];
   playerSeasons: PlayerSeason[];
@@ -143,6 +143,8 @@ export default function MatchList({
   const [noConvocatoriaModalOpen, setNoConvocatoriaModalOpen] = React.useState(false);
   const [showUpcoming, setShowUpcoming] = React.useState(true);
   const [syncingStandings, setSyncingStandings] = React.useState(false);
+  const [matchToDelete, setMatchToDelete] = React.useState<Match | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState(false);
   const instagramPostRef = React.useRef<HTMLDivElement>(null);
 
   const standingsSeasonId =
@@ -810,7 +812,7 @@ export default function MatchList({
                                   <Pencil size={16} className="text-gray-500" />
                                   <span>Editar Partido</span>
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => onDeleteMatch(match.id)} className="gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50">
+                                <DropdownMenuItem onClick={() => setMatchToDelete(match)} className="gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50">
                                   <Trash2 size={16} />
                                   <span>Eliminar Partido</span>
                                 </DropdownMenuItem>
@@ -960,7 +962,7 @@ export default function MatchList({
                                     <span className="font-bold text-xs">{associatedLineup ? 'Ver Alineación' : 'Crear Alineación'}</span>
                                   </DropdownMenuItem>
                                   <div className="h-px bg-gray-50 my-1" />
-                                  <DropdownMenuItem onClick={() => onDeleteMatch(match.id)} className="gap-2 py-2 cursor-pointer rounded-lg text-red-600 focus:text-red-600 focus:bg-red-50">
+                                  <DropdownMenuItem onClick={() => setMatchToDelete(match)} className="gap-2 py-2 cursor-pointer rounded-lg text-red-600 focus:text-red-600 focus:bg-red-50">
                                     <Trash2 size={14} />
                                     <span className="font-bold text-xs">Eliminar</span>
                                   </DropdownMenuItem>
@@ -1243,6 +1245,72 @@ export default function MatchList({
           <DialogFooter>
             <Button onClick={() => setNoConvocatoriaModalOpen(false)} className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl">
               Entendido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!matchToDelete} onOpenChange={(open) => { if (!open && !isDeleting) setMatchToDelete(null); }}>
+        <DialogContent className="sm:max-w-[420px] rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 size={20} />
+              Eliminar Partido
+            </DialogTitle>
+            <DialogDescription>
+              {matchToDelete && (() => {
+                const opp = opponents.find(o => o.id === matchToDelete.opponentId);
+                const season = seasons.find(s => s.id === matchToDelete.seasonId);
+                return (
+                  <>
+                    <span className="block mt-1">
+                      Vas a eliminar el partido contra{' '}
+                      <span className="font-bold text-gray-900">{opp?.name || 'Rival'}</span>
+                      {' '}del{' '}
+                      <span className="font-bold text-gray-900">
+                        {format(new Date(matchToDelete.date), "d 'de' MMMM yyyy", { locale: es })}
+                      </span>
+                      {season && <> ({season.name})</>}.
+                    </span>
+                    <span className="block mt-2 text-red-600 font-medium">
+                      Se borrarán también las estadísticas y convocatoria asociadas. Esta acción no se puede deshacer.
+                    </span>
+                  </>
+                );
+              })()}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setMatchToDelete(null)}
+              disabled={isDeleting}
+              className="rounded-xl border-gray-200"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!matchToDelete) return;
+                setIsDeleting(true);
+                try {
+                  await onDeleteMatch(matchToDelete.id);
+                  setMatchToDelete(null);
+                  if (selectedMatchForDetails?.id === matchToDelete.id) {
+                    setSelectedMatchForDetails(null);
+                  }
+                } catch {
+                  // toast already shown by useMatchActions
+                } finally {
+                  setIsDeleting(false);
+                }
+              }}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700 text-white rounded-xl"
+            >
+              {isDeleting ? <Loader2 size={16} className="animate-spin mr-2" /> : <Trash2 size={16} className="mr-2" />}
+              Eliminar
             </Button>
           </DialogFooter>
         </DialogContent>
