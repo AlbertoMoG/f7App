@@ -69,6 +69,7 @@ import { LazyTopPlayersCard } from './LazyTopPlayersCard';
 import AttendanceChart from './AttendanceChart';
 
 interface DashboardProps {
+  teamId?: string;
   players: Player[];
   playerSeasons: PlayerSeason[];
   matches: Match[];
@@ -82,6 +83,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ 
+  teamId,
   players, 
   playerSeasons, 
   matches, 
@@ -105,9 +107,13 @@ export default function Dashboard({
   };
 
   const handleCleanup = async () => {
+    if (!teamId) {
+      toast.error('No hay equipo seleccionado para limpiar datos');
+      return;
+    }
     try {
       setIsCleaning(true);
-      const { updatesCount, deletesCount } = await cleanupDatabase();
+      const { updatesCount, deletesCount } = await cleanupDatabase(teamId);
       toast.success(`Limpieza completada: ${deletesCount} eliminados, ${updatesCount} actualizados.`);
     } catch (error) {
       console.error("Error cleaning database:", error);

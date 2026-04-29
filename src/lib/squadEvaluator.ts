@@ -1,4 +1,4 @@
-import { Player, Match, PlayerStat, Position } from '../types';
+import { Player, Match, LeagueFixture, StandingsEntry } from '../types';
 import { 
   NO_GOALKEEPER_GC_MODIFIER, 
   EXTRA_ATTACKERS_GF_MODIFIER, 
@@ -6,12 +6,12 @@ import {
   KEY_PLAYER_MISSING_GF_PENALTY,
   KEY_PLAYER_MISSING_GC_PENALTY,
   AGE_MODIFIERS,
-  FATIGUE_DAYS_THRESHOLD,
-  REST_DAYS_THRESHOLD
+  OPPONENT_LEAGUE_FORM_WINDOW,
 } from './predictionConstants';
 import { calculateAge } from './ageUtils';
 import { getSynergyKey, SynergyData } from './synergyCalculator';
 import { SquadAnalysisResult, SquadReason, PlayerRating } from '../types/aiAnalysis';
+import { getOpponentLeagueForm } from './opponentForm';
 
 /**
  * Evalúa una convocatoria (squad) para un partido específico.
@@ -24,7 +24,9 @@ export function evaluateSquad(
   teamAvgBaremo: number,
   allMatchesWithScores: Match[],
   inFormPlayers: Set<string>,
-  keyPlayerIds: string[]
+  keyPlayerIds: string[],
+  leagueFixtures: LeagueFixture[] = [],
+  standings: StandingsEntry[] = []
 ): SquadAnalysisResult {
   const reasons: SquadReason[] = [];
   const squadSize = squadPlayers.length;
@@ -112,10 +114,44 @@ export function evaluateSquad(
       reasons.push({ type: 'negative', text: 'Ausencia de referentes clave' });
   }
 
-  // 5. Baremo final (Simplificado para el ejemplo, pero siguiendo la lógica del plan)
-  // Score base en baremo y tamaño
+  const oppForm = getOpponentLeagueForm(
+    match.opponentId,
+    match.seasonId,
+    leagueFixtures,
+    OPPONENT_LEAGUE_FORM_WINDOW,
+    standings
+  );
+
+  // 6. Baremo final (Simplificado para el ejemplo, pero siguiendo la lógica del plan)
   const baseScore = (avgBaremo / 100) * 60 + Math.min((squadSize / 12) * 40, 40);
   let finalScore = baseScore * (tacticalGFMulti / tacticalGCMulti) * ageMod;
+
+  if (oppForm.sampleGames >= 2) {
+    const strength = Math.min(1, Math.max(0, (oppForm.sampleGames - 1) / 4));
+    if (oppForm.attackTrend > 1.03) {
+      reasons.push({
+        type: 'negative',
+        text: 'Rival con buena racha ofensiva en liga del grupo',
+      });
+      finalScore *= 1 - 0.04 * strength * (oppForm.attackTrend - 1);
+      if (defendersCount < 3) finalScore *= 0.97;
+    }
+    if (oppForm.defenseTrend > 1.03) {
+      reasons.push({
+        type: 'positive',
+        text: 'Rival encaja más goles en liga del grupo (margen ofensivo)',
+      });
+      finalScore *= 1 + 0.03 * strength * (oppForm.defenseTrend - 1);
+    }
+    if (oppForm.defenseTrend < 0.97) {
+      reasons.push({
+        type: 'neutral',
+        text: 'Rival más cerrado atrás últimamente en liga del grupo',
+      });
+      finalScore *= 1 - 0.02 * strength * (1 - oppForm.defenseTrend);
+    }
+  }
+
   finalScore = Math.min(Math.max(finalScore, 0), 100);
 
   let grade: 'S' | 'A' | 'B' | 'C' | 'D' = 'C';

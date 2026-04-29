@@ -1291,7 +1291,7 @@ React.useEffect(() => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {playersWithStats
               .filter(p => p.totals.goals > 0)
               .sort((a, b) => b.totals.goals - a.totals.goals || b.totals.assists - a.totals.assists)
@@ -1325,12 +1325,14 @@ React.useEffect(() => {
                             <img 
                               src={player.photoUrl} 
                               alt={player.alias || player.firstName} 
-                              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                              className="w-full h-full object-cover object-top drop-shadow-[0_10px_10px_rgba(0,0,0,0.5)] [mask-image:linear-gradient(to_bottom,black_70%,transparent_100%)] transition-transform duration-500 group-hover:scale-105"
                               referrerPolicy="no-referrer"
                             />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center bg-emerald-50 text-emerald-200">
-                              <Users size={80} />
+                              <span className="text-8xl sm:text-9xl font-black opacity-20 select-none leading-none">
+                                {(player.firstName?.[0] ?? '')}{(player.lastName?.[0] ?? '')}
+                              </span>
                             </div>
                           )}
                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-6">

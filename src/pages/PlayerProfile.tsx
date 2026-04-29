@@ -92,7 +92,11 @@ export default function PlayerProfile() {
         }
 
         // Fetch stats
-        const statsQuery = query(collection(db, 'playerStats'), where('playerId', '==', playerId));
+        const statsQuery = query(
+          collection(db, 'playerStats'),
+          where('teamId', '==', playerData.teamId),
+          where('playerId', '==', playerId)
+        );
         const statsSnapshot = await getDocs(statsQuery);
         const playerStats = statsSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as PlayerStat));
         setStats(playerStats);
@@ -110,8 +114,20 @@ export default function PlayerProfile() {
           getDocs(query(collection(db, 'seasons'), where('teamId', '==', playerData.teamId))),
           getDocs(query(collection(db, 'opponents'), where('teamId', '==', playerData.teamId))),
           getDoc(doc(db, 'team', playerData.teamId)),
-          getDocs(query(collection(db, 'playerSeasons'), where('playerId', '==', playerId))),
-          getDocs(query(collection(db, 'injuries'), where('playerId', '==', playerId)))
+          getDocs(
+            query(
+              collection(db, 'playerSeasons'),
+              where('teamId', '==', playerData.teamId),
+              where('playerId', '==', playerId)
+            )
+          ),
+          getDocs(
+            query(
+              collection(db, 'injuries'),
+              where('teamId', '==', playerData.teamId),
+              where('playerId', '==', playerId)
+            )
+          )
         ]);
 
         matchesSnap.docs.forEach(d => {

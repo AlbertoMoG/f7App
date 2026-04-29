@@ -1,19 +1,20 @@
-import { collection, getDocs, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, writeBatch, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Player, Opponent, Match, PlayerStat, Lineup } from '../types';
+import { Player, Opponent, Match, PlayerStat, Lineup, LeagueFixture } from '../types';
 
-export const cleanupDatabase = async () => {
+export const cleanupDatabase = async (teamId: string) => {
   let updatesCount = 0;
   let deletesCount = 0;
 
-  // 1. Fetch all current valid IDs
-  const [seasonsSnap, playersSnap, opponentsSnap, matchesSnap, statsSnap, lineupsSnap] = await Promise.all([
-    getDocs(collection(db, 'seasons')),
-    getDocs(collection(db, 'players')),
-    getDocs(collection(db, 'opponents')),
-    getDocs(collection(db, 'matches')),
-    getDocs(collection(db, 'playerStats')),
-    getDocs(collection(db, 'lineups'))
+  // 1. Fetch all current valid IDs for this team only
+  const [seasonsSnap, playersSnap, opponentsSnap, matchesSnap, statsSnap, lineupsSnap, leagueFxSnap] = await Promise.all([
+    getDocs(query(collection(db, 'seasons'), where('teamId', '==', teamId))),
+    getDocs(query(collection(db, 'players'), where('teamId', '==', teamId))),
+    getDocs(query(collection(db, 'opponents'), where('teamId', '==', teamId))),
+    getDocs(query(collection(db, 'matches'), where('teamId', '==', teamId))),
+    getDocs(query(collection(db, 'playerStats'), where('teamId', '==', teamId))),
+    getDocs(query(collection(db, 'lineups'), where('teamId', '==', teamId))),
+    getDocs(query(collection(db, 'leagueFixtures'), where('teamId', '==', teamId))),
   ]);
 
   const validSeasonIds = new Set(seasonsSnap.docs.map(d => d.id));
@@ -47,7 +48,20 @@ export const cleanupDatabase = async () => {
     }
   });
 
-  // 4. Clean Matches (orphaned seasonId or opponentId)
+  // 4. Clean leagueFixtures (orphaned season or opponents)
+  leagueFxSnap.docs.forEach(d => {
+    const data = d.data() as LeagueFixture;
+    if (
+      !validSeasonIds.has(data.seasonId) ||
+      !validOpponentIds.has(data.homeOpponentId) ||
+      !validOpponentIds.has(data.awayOpponentId)
+    ) {
+      operations.push({ type: 'delete', ref: d.ref });
+      deletesCount++;
+    }
+  });
+
+  // 5. Clean Matches (orphaned seasonId or opponentId)
   matchesSnap.docs.forEach(d => {
     const data = d.data() as Match;
     if (!validSeasonIds.has(data.seasonId) || !validOpponentIds.has(data.opponentId)) {
@@ -57,7 +71,7 @@ export const cleanupDatabase = async () => {
     }
   });
 
-  // 5. Clean PlayerStats (orphaned playerId, matchId, or seasonId)
+  // 6. Clean PlayerStats (orphaned playerId, matchId, or seasonId)
   statsSnap.docs.forEach(d => {
     const data = d.data() as PlayerStat;
     if (!validPlayerIds.has(data.playerId) || !validMatchIds.has(data.matchId) || !validSeasonIds.has(data.seasonId)) {
@@ -66,7 +80,7 @@ export const cleanupDatabase = async () => {
     }
   });
 
-  // 6. Clean Lineups
+  // 7. Clean Lineups
   lineupsSnap.docs.forEach(d => {
     const data = d.data() as Lineup;
     let needsUpdate = false;

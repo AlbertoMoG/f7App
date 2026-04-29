@@ -51,7 +51,7 @@ export default function Treasury({ teamId }: { teamId: string }) {
         const [seasonsSnap, playersSnap, playerSeasonsSnap, matchesSnap] = await Promise.all([
           getDocs(query(collection(db, 'seasons'), where('teamId', '==', teamId))),
           getDocs(query(collection(db, 'players'), where('teamId', '==', teamId))),
-          getDocs(query(collection(db, 'playerSeasons'))),
+          getDocs(query(collection(db, 'playerSeasons'), where('teamId', '==', teamId))),
           getDocs(query(collection(db, 'matches'), where('teamId', '==', teamId)))
         ]);
 
@@ -106,7 +106,13 @@ export default function Treasury({ teamId }: { teamId: string }) {
         }
 
         // Fetch payments
-        const paymentsSnap = await getDocs(query(collection(db, 'playerPayments'), where('seasonId', '==', selectedSeasonId)));
+        const paymentsSnap = await getDocs(
+          query(
+            collection(db, 'playerPayments'),
+            where('teamId', '==', teamId),
+            where('seasonId', '==', selectedSeasonId)
+          )
+        );
         const paymentsData: Record<string, PlayerPayment> = {};
         const inputsData: Record<string, string> = {};
         

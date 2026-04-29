@@ -11,8 +11,8 @@ import {
   updateDoc,
   addDoc
 } from 'firebase/firestore';
-import { db } from '../firebase';
-import { Player, Match, PlayerStat, Attendance, Opponent, Team, Injury, Season, StandingsEntry, PlayerSeason } from '../types';
+import { db, auth } from '../firebase';
+import { Player, Match, PlayerStat, Attendance, Opponent, Team, Injury, Season, StandingsEntry, PlayerSeason, LeagueFixture } from '../types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
@@ -52,6 +52,7 @@ import { calculateAge } from '../lib/ageUtils';
 import { getStandingsStats } from '../lib/standingsUtils';
 import { buildSynergyMap, getSynergyKey } from '../lib/synergyCalculator';
 import { getMostProbableScore } from '../lib/poisson';
+import { applyLeagueFormToPredictionModifiers } from '../lib/opponentForm';
 import { calculatePlayerRating } from '../lib/ratingSystem';
 import { PlayerRating } from '../types/aiAnalysis';
 
@@ -70,6 +71,7 @@ export default function MatchStats() {
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [allMatches, setAllMatches] = useState<Match[]>([]);
   const [standings, setStandings] = useState<StandingsEntry[]>([]);
+  const [allLeagueFixtures, setAllLeagueFixtures] = useState<LeagueFixture[]>([]);
   const [playerSeasons, setPlayerSeasons] = useState<PlayerSeason[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -143,7 +145,11 @@ export default function MatchStats() {
         }
 
         // Fetch PlayerSeasons for this season (Reactive)
-        const psQuery = query(collection(db, 'playerSeasons'), where('seasonId', '==', matchData.seasonId));
+        const psQuery = query(
+          collection(db, 'playerSeasons'),
+          where('teamId', '==', matchData.teamId),
+          where('seasonId', '==', matchData.seasonId)
+        );
         unsubPlayerSeasons = onSnapshot(psQuery, (snapshot) => {
           setSeasonPlayerIds(snapshot.docs.map(d => d.data().playerId));
         });
@@ -155,7 +161,11 @@ export default function MatchStats() {
         });
 
         // Fetch Stats
-        const statsQuery = query(collection(db, 'playerStats'), where('matchId', '==', matchId));
+        const statsQuery = query(
+          collection(db, 'playerStats'),
+          where('teamId', '==', matchData.teamId),
+          where('matchId', '==', matchId)
+        );
         unsubStats = onSnapshot(statsQuery, (snapshot) => {
           const statsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlayerStat));
           setStats(statsData);
@@ -196,11 +206,22 @@ export default function MatchStats() {
         setAllMatches(matchesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Match)));
 
         // Fetch Standings
-        const standingsSnap = await getDocs(collection(db, 'standings'));
+        const standingsSnap = await getDocs(
+          query(collection(db, 'standings'), where('teamId', '==', matchData.teamId))
+        );
         setStandings(standingsSnap.docs.map(d => ({ id: d.id, ...d.data() } as StandingsEntry)));
 
+        const leagueFxSnap = await getDocs(
+          query(collection(db, 'leagueFixtures'), where('teamId', '==', matchData.teamId))
+        );
+        setAllLeagueFixtures(
+          leagueFxSnap.docs.map((d) => ({ id: d.id, ...d.data() } as LeagueFixture))
+        );
+
         // Fetch PlayerSeasons
-        const playerSeasonsSnap = await getDocs(collection(db, 'playerSeasons'));
+        const playerSeasonsSnap = await getDocs(
+          query(collection(db, 'playerSeasons'), where('teamId', '==', matchData.teamId))
+        );
         setPlayerSeasons(playerSeasonsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PlayerSeason)));
 
         setLoading(false);
@@ -222,11 +243,16 @@ export default function MatchStats() {
 
   // Handle team data separately to ensure it's loaded
   useEffect(() => {
-    const unsubTeam = onSnapshot(collection(db, 'team'), (snapshot) => {
-      if (!snapshot.empty) {
-        setTeam({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Team);
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const unsubTeam = onSnapshot(
+      query(collection(db, 'team'), where('ownerId', '==', uid)),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          setTeam({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Team);
+        }
       }
-    });
+    );
     return () => unsubTeam();
   }, []);
 
@@ -296,7 +322,8 @@ export default function MatchStats() {
       // Update Stats in Firestore
       for (const stat of finalStats) {
         if (stat.id) {
-          await updateDoc(doc(db, 'playerStats', stat.id), { ...stat });
+          const { id, ...statData } = stat;
+          await updateDoc(doc(db, 'playerStats', stat.id), statData);
         } else {
           const { id, ...rest } = stat;
           await addDoc(collection(db, 'playerStats'), rest);
@@ -432,6 +459,19 @@ export default function MatchStats() {
           const momentumGC = recentMatches.length > 0 ? (recentMatches.reduce((acc, m) => acc + (m.scoreOpponent || 0), 0) / recentMatches.length) - globalAvgGC : 0;
           totalModifierGF *= Math.max(0.8, Math.min(1.2, 1 + (momentumGF * 0.1)));
           totalModifierGC *= Math.max(0.8, Math.min(1.2, 1 + (momentumGC * 0.1)));
+
+          const leagueFormScratch: string[] = [];
+          const leagueAdj = applyLeagueFormToPredictionModifiers(
+            match.opponentId,
+            match.seasonId,
+            allLeagueFixtures,
+            totalModifierGF,
+            totalModifierGC,
+            leagueFormScratch,
+            standings
+          );
+          totalModifierGF = leagueAdj.totalModifierGF;
+          totalModifierGC = leagueAdj.totalModifierGC;
 
           const finalPredGF = Math.max(0.1, predGF * totalModifierGF + (Math.abs(biasGF) > 0.1 ? biasGF : 0));
           const finalPredGC = Math.max(0.1, predGC * totalModifierGC + (Math.abs(biasGC) > 0.1 ? biasGC : 0));

@@ -11,11 +11,34 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Trophy, Save, ListRestart, Info, Brain, TrendingUp } from 'lucide-react';
-import { Match, Opponent, StandingsEntry, Team, Season } from '../types';
+import { Trophy, Save, ListRestart, Info, Brain, TrendingUp, CalendarRange, Loader2, ExternalLink, UsersRound, ShieldAlert } from 'lucide-react';
+import { Match, Opponent, StandingsEntry, Team, Season, LeagueFixture } from '../types';
+import { cn } from '@/lib/utils';
+import LeagueGroupView from './LeagueGroupView';
 import { collection, addDoc, updateDoc, doc, writeBatch } from 'firebase/firestore';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { db } from '../firebase';
 import { toast } from 'sonner';
+import { buildMissingIdaYVueltaMatches } from '../lib/leagueSchedule';
+import {
+  aggregateLeagueStandingsFromResults,
+  collectStandingsParticipantIds,
+  emptyLeagueStandingStats,
+  isLeagueMatchForStandings,
+  type LeagueStandingStats,
+} from '../lib/leagueStandingsAggregate';
+import {
+  auditLeagueStandingsData,
+  standingsEntryHasManualAdjustment,
+} from '../lib/leagueStandingsAudit';
+import { resetManualStandingsDeltaForSeason } from '../lib/resetManualStandingsForSeason';
 
 interface StandingsViewProps {
   team: Team | null;
@@ -24,6 +47,8 @@ interface StandingsViewProps {
   standings: StandingsEntry[];
   globalSeasonId: string;
   seasons: Season[];
+  leagueFixtures: LeagueFixture[];
+  onOpenMatch?: (matchId: string) => void;
 }
 
 interface RowData {
@@ -41,103 +66,174 @@ interface RowData {
   dbId?: string;
 }
 
-export default function StandingsView({ team, opponents, matches, standings, globalSeasonId, seasons }: StandingsViewProps) {
+type StandingsSubTab = 'table' | 'my-matches' | 'group';
+
+export default function StandingsView({ team, opponents, matches, standings, globalSeasonId, seasons, leagueFixtures, onOpenMatch }: StandingsViewProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedStandings, setEditedStandings] = useState<Record<string, Partial<StandingsEntry>>>({});
+  const [generatingLeague, setGeneratingLeague] = useState(false);
+  const [standingsSubTab, setStandingsSubTab] = useState<StandingsSubTab>('table');
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [resettingManual, setResettingManual] = useState(false);
 
   const currentSeasonId = useMemo(() => {
     if (globalSeasonId !== 'all') return globalSeasonId;
     return seasons.length > 0 ? seasons[0].id : '';
   }, [globalSeasonId, seasons]);
 
-  // 1. Helper para calcular stats automáticas (basado solo en partidos registrados)
-  const getAutoStats = (id: string) => {
-    const isMyTeam = id === 'my-team';
-    const seasonMatches = matches.filter(m => 
-      m.seasonId === currentSeasonId && 
-      (isMyTeam ? true : m.opponentId === id) &&
-      m.status === 'completed' && 
-      m.type === 'league'
-    );
+  const leagueOpponentIds = useMemo(() => {
+    return opponents
+      .filter((o) => o.seasonIds?.includes(currentSeasonId))
+      .map((o) => o.id);
+  }, [opponents, currentSeasonId]);
 
-    let played = 0;
-    let won = 0;
-    let drawn = 0;
-    let lost = 0;
-    let goalsFor = 0;
-    let goalsAgainst = 0;
+  const leagueMatches = useMemo(() => {
+    return matches
+      .filter((m) => m.seasonId === currentSeasonId && isLeagueMatchForStandings(m))
+      .sort((a, b) => {
+        const ja = parseInt(a.round?.replace(/\D/g, '') || '0', 10);
+        const jb = parseInt(b.round?.replace(/\D/g, '') || '0', 10);
+        if (ja !== jb) return ja - jb;
+        return new Date(a.date).getTime() - new Date(b.date).getTime();
+      });
+  }, [matches, currentSeasonId]);
 
-    seasonMatches.forEach(m => {
-      if (m.scoreTeam != null && m.scoreOpponent != null) {
-        played++;
-        const teamScore = isMyTeam ? m.scoreTeam : m.scoreOpponent;
-        const oppScore = isMyTeam ? m.scoreOpponent : m.scoreTeam;
-        
-        goalsFor += teamScore;
-        goalsAgainst += oppScore;
-        
-        if (teamScore > oppScore) won++;
-        else if (teamScore < oppScore) lost++;
-        else drawn++;
+  const currentSeason = useMemo(
+    () => seasons.find((s) => s.id === currentSeasonId),
+    [seasons, currentSeasonId]
+  );
+
+  const handleGenerateLeagueSchedule = async () => {
+    if (!team || !currentSeasonId || !currentSeason) {
+      toast.error('Selecciona una temporada con datos completos');
+      return;
+    }
+    if (leagueOpponentIds.length === 0) {
+      toast.error('No hay rivales asignados a esta temporada');
+      return;
+    }
+    setGeneratingLeague(true);
+    try {
+      const toAdd = buildMissingIdaYVueltaMatches(
+        team.id,
+        currentSeasonId,
+        leagueOpponentIds,
+        currentSeason.startYear,
+        matches
+      );
+      if (toAdd.length === 0) {
+        toast.info('Ya existen todos los partidos de liga (ida y vuelta) para esta temporada');
+        return;
       }
-    });
-
-    return { played, won, drawn, lost, goalsFor, goalsAgainst, points: (won * 3) + drawn };
+      const batch = writeBatch(db);
+      for (const payload of toAdd) {
+        const ref = doc(collection(db, 'matches'));
+        batch.set(ref, payload);
+      }
+      await batch.commit();
+      toast.success(`Creados ${toAdd.length} partido(s) de liga. Ajusta jornadas o fechas si lo necesitas.`);
+    } catch (e) {
+      console.error(e);
+      toast.error('No se pudo generar el calendario');
+    } finally {
+      setGeneratingLeague(false);
+    }
   };
 
-  // 2. Preparar datos de la tabla (Mezclar auto y manual para todos)
+  const handleLeagueRoundBlur = async (match: Match, value: string) => {
+    const next = value.trim();
+    if (next === (match.round ?? '').trim()) return;
+    try {
+      await updateDoc(doc(db, 'matches', match.id), { round: next || null });
+      toast.success('Jornada actualizada');
+    } catch (e) {
+      console.error(e);
+      toast.error('No se pudo guardar la jornada');
+    }
+  };
+
+  const computedStandingsById = useMemo(() => {
+    if (!currentSeasonId) return new Map<string, LeagueStandingStats>();
+    return aggregateLeagueStandingsFromResults(
+      currentSeasonId,
+      team,
+      opponents,
+      matches,
+      leagueFixtures
+    );
+  }, [currentSeasonId, team, opponents, matches, leagueFixtures]);
+
+  const standingsIdsThisSeason = useMemo(
+    () => standings.filter((s) => s.seasonId === currentSeasonId).map((s) => s.opponentId),
+    [standings, currentSeasonId]
+  );
+
+  const participantIds = useMemo(
+    () =>
+      currentSeasonId
+        ? collectStandingsParticipantIds(
+            currentSeasonId,
+            team,
+            opponents,
+            matches,
+            leagueFixtures,
+            standingsIdsThisSeason
+          )
+        : [],
+    [currentSeasonId, team, opponents, matches, leagueFixtures, standingsIdsThisSeason]
+  );
+
   const fullStandings = useMemo(() => {
     if (!currentSeasonId) return [];
 
-    // Stats de los rivales
-    const statsList: RowData[] = opponents
-      .filter(opp => {
-        const isInSeason = !opp.seasonIds || opp.seasonIds.includes(currentSeasonId);
-        if (!isInSeason) return false;
+    const statsList: RowData[] = [];
 
-        const hasLeagueMatch = matches.some(m => m.opponentId === opp.id && m.seasonId === currentSeasonId && m.type === 'league');
-        const hasManualEntry = standings.some(s => s.seasonId === currentSeasonId && s.opponentId === opp.id);
-        
-        return hasLeagueMatch || hasManualEntry;
-      })
-      .map(opp => {
-        const entry = standings.find(s => s.seasonId === currentSeasonId && s.opponentId === opp.id);
-        const auto = getAutoStats(opp.id);
+    for (const id of participantIds) {
+      if (id === 'my-team' && !team) continue;
+      const auto = computedStandingsById.get(id) ?? emptyLeagueStandingStats();
+      const entry = standings.find((s) => s.seasonId === currentSeasonId && s.opponentId === id);
+      const showRow =
+        id === 'my-team'
+          ? !!team
+          : auto.played > 0 ||
+            !!entry ||
+            leagueFixtures.some(
+              (f) =>
+                f.seasonId === currentSeasonId &&
+                (f.homeOpponentId === id || f.awayOpponentId === id)
+            ) ||
+            matches.some(
+              (m) =>
+                m.seasonId === currentSeasonId &&
+                isLeagueMatchForStandings(m) &&
+                m.opponentId === id
+            );
+      if (!showRow) continue;
 
-        return {
-          opponentId: opp.id,
-          name: opp.name,
-          shieldUrl: opp.shieldUrl,
-          played: (entry?.played || 0) + auto.played,
-          won: (entry?.won || 0) + auto.won,
-          drawn: (entry?.drawn || 0) + auto.drawn,
-          lost: (entry?.lost || 0) + auto.lost,
-          goalsFor: (entry?.goalsFor || 0) + auto.goalsFor,
-          goalsAgainst: (entry?.goalsAgainst || 0) + auto.goalsAgainst,
-          points: (entry?.points || 0) + auto.points,
-          isAuto: false,
-          dbId: entry?.id
-        };
-      });
+      let name: string;
+      let shieldUrl: string | undefined;
+      if (id === 'my-team' && team) {
+        name = team.name;
+        shieldUrl = team.shieldUrl;
+      } else {
+        const opp = opponents.find((o) => o.id === id);
+        name = opp?.name ?? `Equipo (${id.length > 10 ? `${id.slice(0, 8)}…` : id})`;
+        shieldUrl = opp?.shieldUrl;
+      }
 
-    // Stats de "Mi Equipo"
-    if (team) {
-      const myEntry = standings.find(s => s.seasonId === currentSeasonId && s.opponentId === 'my-team');
-      const myAuto = getAutoStats('my-team');
-      
       statsList.push({
-        opponentId: 'my-team',
-        name: team.name,
-        shieldUrl: team.shieldUrl,
-        played: (myEntry?.played || 0) + myAuto.played,
-        won: (myEntry?.won || 0) + myAuto.won,
-        drawn: (myEntry?.drawn || 0) + myAuto.drawn,
-        lost: (myEntry?.lost || 0) + myAuto.lost,
-        goalsFor: (myEntry?.goalsFor || 0) + myAuto.goalsFor,
-        goalsAgainst: (myEntry?.goalsAgainst || 0) + myAuto.goalsAgainst,
-        points: (myEntry?.points || 0) + myAuto.points,
+        opponentId: id,
+        name,
+        shieldUrl,
+        played: (entry?.played ?? 0) + auto.played,
+        won: (entry?.won ?? 0) + auto.won,
+        drawn: (entry?.drawn ?? 0) + auto.drawn,
+        lost: (entry?.lost ?? 0) + auto.lost,
+        goalsFor: (entry?.goalsFor ?? 0) + auto.goalsFor,
+        goalsAgainst: (entry?.goalsAgainst ?? 0) + auto.goalsAgainst,
+        points: (entry?.points ?? 0) + auto.points,
         isAuto: false,
-        dbId: myEntry?.id
+        dbId: entry?.id,
       });
     }
 
@@ -148,7 +244,16 @@ export default function StandingsView({ team, opponents, matches, standings, glo
       if (bDiff !== aDiff) return bDiff - aDiff;
       return b.goalsFor - a.goalsFor;
     });
-  }, [opponents, standings, matches, team, currentSeasonId]);
+  }, [
+    participantIds,
+    computedStandingsById,
+    standings,
+    currentSeasonId,
+    team,
+    opponents,
+    matches,
+    leagueFixtures,
+  ]);
 
   const predictedStandings = useMemo(() => {
     const totalTeams = fullStandings.length;
@@ -198,7 +303,7 @@ export default function StandingsView({ team, opponents, matches, standings, glo
       // Si se cambia G, E o P, actualizamos automáticamente PJ y Puntos
       if (field === 'won' || field === 'drawn' || field === 'lost') {
         const entry = standings.find(s => s.seasonId === currentSeasonId && s.opponentId === opponentId);
-        const auto = getAutoStats(opponentId);
+        const auto = computedStandingsById.get(opponentId) ?? emptyLeagueStandingStats();
         
         const currentWon = updatedEntry.won !== undefined ? updatedEntry.won : ((entry?.won || 0) + auto.won);
         const currentDrawn = updatedEntry.drawn !== undefined ? updatedEntry.drawn : ((entry?.drawn || 0) + auto.drawn);
@@ -215,13 +320,54 @@ export default function StandingsView({ team, opponents, matches, standings, glo
     });
   };
 
+  const auditResult = useMemo(() => {
+    if (!currentSeasonId) return null;
+    return auditLeagueStandingsData({
+      seasonId: currentSeasonId,
+      team,
+      opponents,
+      matches,
+      leagueFixtures,
+      standings,
+    });
+  }, [currentSeasonId, team, opponents, matches, leagueFixtures, standings]);
+
+  const manualStandingsForSeason = useMemo(() => {
+    return standings.filter(
+      (s) => s.seasonId === currentSeasonId && standingsEntryHasManualAdjustment(s)
+    );
+  }, [standings, currentSeasonId]);
+
+  const openAuditDialog = () => setAuditOpen(true);
+
+  const handleResetManualStandings = async () => {
+    if (!team || manualStandingsForSeason.length === 0) return;
+    if (
+      !confirm(
+        `¿Poner a cero el ajuste manual en ${manualStandingsForSeason.length} fila(s) de standings para esta temporada? La tabla usará solo el cálculo automático.`
+      )
+    ) {
+      return;
+    }
+    setResettingManual(true);
+    try {
+      await resetManualStandingsDeltaForSeason(team, currentSeasonId, standings);
+      toast.success('Ajustes manuales de clasificación puestos a cero');
+    } catch (e) {
+      console.error(e);
+      toast.error('No se pudo actualizar standings');
+    } finally {
+      setResettingManual(false);
+    }
+  };
+
   const saveChanges = async () => {
     if (!team) return;
     
     try {
       const promises = Object.entries(editedStandings).map(async ([opponentId, data]) => {
         const existingEntry = standings.find(s => s.seasonId === currentSeasonId && s.opponentId === opponentId);
-        const auto = getAutoStats(opponentId);
+        const auto = computedStandingsById.get(opponentId) ?? emptyLeagueStandingStats();
 
         // Al guardar, restamos lo automático de los totales introducidos por el usuario
         // para que Firestore solo guarde el "resto de partidos" (manual)
@@ -269,29 +415,171 @@ export default function StandingsView({ team, opponents, matches, standings, glo
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Clasificación</h2>
-          <p className="text-gray-500">Gestión de la tabla del grupo y puntos de rivales.</p>
+          <p className="text-gray-500 text-sm mt-1">
+            Tabla, tus partidos de liga y enfrentamientos entre rivales del grupo (datos para la IA).
+          </p>
         </div>
-        <div className="flex gap-2">
-          {isEditing ? (
-            <>
-              <Button variant="outline" onClick={() => { setIsEditing(false); setEditedStandings({}); }}>
-                Cancelar
-              </Button>
-              <Button onClick={saveChanges} className="bg-blue-600 hover:bg-blue-700">
-                <Save className="mr-2 h-4 w-4" /> Guardar Cambios
-              </Button>
-            </>
-          ) : (
-            <Button onClick={() => setIsEditing(true)}>
-              <ListRestart className="mr-2 h-4 w-4" /> Actualizar Puntos
-            </Button>
-          )}
-        </div>
+        {standingsSubTab === 'table' ? (
+          <div className="flex flex-wrap gap-2 shrink-0 justify-end">
+            {isEditing ? (
+              <>
+                <Button variant="outline" onClick={() => { setIsEditing(false); setEditedStandings({}); }}>
+                  Cancelar
+                </Button>
+                <Button onClick={saveChanges} className="bg-blue-600 hover:bg-blue-700">
+                  <Save className="mr-2 h-4 w-4" /> Guardar Cambios
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button type="button" variant="outline" onClick={openAuditDialog}>
+                  <ShieldAlert className="mr-2 h-4 w-4" /> Auditar datos
+                </Button>
+                <Button onClick={() => setIsEditing(true)}>
+                  <ListRestart className="mr-2 h-4 w-4" /> Actualizar Puntos
+                </Button>
+              </>
+            )}
+          </div>
+        ) : null}
       </div>
 
+      <div className="flex flex-wrap gap-1 border-b border-gray-200 pb-px">
+        {([
+          { id: 'table' as const, label: 'Tabla', Icon: Trophy },
+          { id: 'my-matches' as const, label: 'Mis partidos de liga', Icon: CalendarRange },
+          { id: 'group' as const, label: 'Liga entre equipos', Icon: UsersRound },
+        ]).map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setStandingsSubTab(id)}
+            className={cn(
+              'inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-t-lg border-b-2 -mb-px transition-colors',
+              standingsSubTab === id
+                ? 'border-blue-600 text-blue-700 bg-white'
+                : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+            )}
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {standingsSubTab === 'my-matches' ? (
+      <Card className="rounded-2xl border-gray-200 overflow-hidden">
+        <CardHeader className="bg-gray-50/50 border-b border-gray-100">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <CalendarRange className="h-5 w-5 text-blue-600" />
+            Calendario de liga (ida y vuelta)
+          </CardTitle>
+          <CardDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="flex items-center gap-1.5">
+              <Info className="h-3.5 w-3.5 shrink-0" />
+              Genera 2 partidos por rival (local y visitante). Los resultados ya cerrados se mantienen; solo crea huecos que falten.
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700 shrink-0"
+              disabled={!team || leagueOpponentIds.length === 0 || generatingLeague}
+              onClick={handleGenerateLeagueSchedule}
+            >
+              {generatingLeague ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              Generar / completar calendario
+            </Button>
+          </CardDescription>
+          <p className="text-xs text-gray-500">
+            Rivales en esta temporada: <strong>{leagueOpponentIds.length}</strong>
+            {currentSeason ? ` · Año inicio: ${currentSeason.startYear}` : null}
+          </p>
+        </CardHeader>
+        <CardContent className="p-0 overflow-x-auto">
+          {leagueMatches.length === 0 ? (
+            <div className="p-8 text-center text-gray-500 text-sm">
+              No hay partidos de liga en esta temporada. Usa el botón superior o créalos desde Partidos.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className="bg-gray-50">
+                <TableRow>
+                  <TableHead className="min-w-[7rem]">Jornada</TableHead>
+                  <TableHead className="min-w-[6rem]">Fecha</TableHead>
+                  <TableHead>Rival</TableHead>
+                  <TableHead className="text-center w-20">L / V</TableHead>
+                  <TableHead className="text-center">Resultado</TableHead>
+                  <TableHead className="text-center">Estado</TableHead>
+                  {onOpenMatch ? <TableHead className="w-12" /> : null}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {leagueMatches.map((m) => {
+                  const opp = opponents.find((o) => o.id === m.opponentId);
+                  const scoreLabel =
+                    m.status === 'completed' &&
+                    m.scoreTeam != null &&
+                    m.scoreOpponent != null
+                      ? `${m.scoreTeam} - ${m.scoreOpponent}`
+                      : '—';
+                  return (
+                    <TableRow key={m.id}>
+                      <TableCell>
+                        <Input
+                          className="h-8 text-sm min-w-[6.5rem]"
+                          defaultValue={m.round ?? ''}
+                          placeholder="Ej. Jornada 3"
+                          onBlur={(e) => handleLeagueRoundBlur(m, e.target.value)}
+                        />
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-600 whitespace-nowrap">
+                        {new Date(m.date).toLocaleDateString('es-ES', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </TableCell>
+                      <TableCell className="font-medium">{opp?.name ?? m.opponentId}</TableCell>
+                      <TableCell className="text-center text-xs">
+                        {m.isHome === false ? 'Visitante' : 'Local'}
+                      </TableCell>
+                      <TableCell className="text-center font-mono text-sm">{scoreLabel}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="secondary" className="text-[10px]">
+                          {m.status === 'completed' ? 'Finalizado' : 'Programado'}
+                        </Badge>
+                      </TableCell>
+                      {onOpenMatch ? (
+                        <TableCell>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            title="Abrir en partidos"
+                            onClick={() => onOpenMatch(m.id)}
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      ) : null}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+      ) : null}
+
+      {standingsSubTab === 'table' ? (
+      <>
       <Card className="rounded-2xl border-gray-200 overflow-hidden">
         <CardHeader className="bg-gray-50/50 border-b border-gray-100">
           <CardTitle className="text-lg flex items-center gap-2">
@@ -300,7 +588,7 @@ export default function StandingsView({ team, opponents, matches, standings, glo
           </CardTitle>
           <CardDescription className="flex items-center gap-1.5">
             <Info className="h-3.5 w-3.5" />
-            Tu equipo se calcula automáticamente basado en los partidos jugados.
+            Solo cuentan partidos terminados (estado finalizado y marcador completo), en tus partidos de liga y en la liga entre equipos. Puedes sumar ajustes manuales al guardar.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -429,7 +717,6 @@ export default function StandingsView({ team, opponents, matches, standings, glo
         </CardContent>
       </Card>
 
-      {/* AI Prediction Section */}
       <Card className="rounded-2xl border-emerald-100/50 bg-emerald-50/20 overflow-hidden mt-8 shadow-sm">
         <CardHeader className="bg-emerald-50/50 border-b border-emerald-100/50">
           <CardTitle className="text-lg flex items-center gap-2 text-emerald-800">
@@ -502,6 +789,89 @@ export default function StandingsView({ team, opponents, matches, standings, glo
           </Table>
         </CardContent>
       </Card>
+      </>
+      ) : null}
+
+      {standingsSubTab === 'group' ? (
+        <LeagueGroupView
+          team={team}
+          opponents={opponents}
+          leagueFixtures={leagueFixtures}
+          globalSeasonId={globalSeasonId}
+          seasons={seasons}
+          seasonContextId={currentSeasonId}
+          embedded
+        />
+      ) : null}
+
+      <Dialog open={auditOpen} onOpenChange={setAuditOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[min(90vh,640px)] flex flex-col gap-0 overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Auditoría de clasificación</DialogTitle>
+            <DialogDescription>
+              Comprueba duplicados, topes teóricos y ajustes manuales en Firestore para la temporada
+              actual. No borra partidos ni enfrentamientos.
+            </DialogDescription>
+          </DialogHeader>
+          {auditResult ? (
+            <>
+              <div className="text-xs text-gray-600 space-y-1 px-1 pb-2 border-b border-gray-100 shrink-0">
+                <p>
+                  Participantes en tabla (aprox.):{' '}
+                  <strong className="text-gray-900">{auditResult.teamCount}</strong>
+                </p>
+                <p>
+                  PJ máx. teórico (todos contra todos, ida y vuelta):{' '}
+                  <strong className="text-gray-900">{auditResult.maxPlayedPerTeam}</strong>
+                </p>
+                <p>
+                  Duplicados:{' '}
+                  <strong className="text-gray-900">{auditResult.duplicateFinishedMatchGroups}</strong>{' '}
+                  en tus partidos de liga,{' '}
+                  <strong className="text-gray-900">{auditResult.duplicateFinishedFixtureGroups}</strong>{' '}
+                  en liga entre equipos.
+                </p>
+              </div>
+              <div className="overflow-y-auto min-h-0 flex-1 py-3 space-y-2 pr-1">
+                {auditResult.issues.map((issue, i) => (
+                  <div
+                    key={`${issue.code}-${i}`}
+                    className={cn(
+                      'text-sm rounded-lg border p-2.5',
+                      issue.severity === 'error'
+                        ? 'border-red-200 bg-red-50/90 text-red-950'
+                        : 'border-amber-200 bg-amber-50/70 text-amber-950'
+                    )}
+                  >
+                    <div className="font-medium leading-snug">{issue.message}</div>
+                    {issue.detail ? (
+                      <div className="text-xs mt-1.5 text-gray-700 break-words">{issue.detail}</div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <DialogFooter className="flex-col sm:flex-row gap-2 sm:justify-end border-t border-gray-100 pt-3 shrink-0">
+                <Button type="button" variant="outline" onClick={() => setAuditOpen(false)}>
+                  Cerrar
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={
+                    !team || manualStandingsForSeason.length === 0 || resettingManual
+                  }
+                  onClick={handleResetManualStandings}
+                >
+                  {resettingManual ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  Poner a cero ajustes manuales
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

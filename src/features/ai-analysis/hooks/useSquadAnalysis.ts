@@ -1,5 +1,5 @@
 import React from 'react';
-import { Player, Match, PlayerStat, PlayerSeason, Injury } from '../../../types';
+import { Player, Match, PlayerStat, PlayerSeason, Injury, LeagueFixture, StandingsEntry } from '../../../types';
 import { buildSynergyMap } from '../../../lib/synergyCalculator';
 import { evaluateSquad } from '../../../lib/squadEvaluator';
 import { calculatePlayerDelta } from '../../../lib/deltaCalculator';
@@ -13,6 +13,8 @@ interface UseSquadAnalysisProps {
   injuries: Injury[];
   globalSeasonId: string;
   allPlayerRatings: PlayerRating[];
+  leagueFixtures?: LeagueFixture[];
+  standings?: StandingsEntry[];
 }
 
 export function useSquadAnalysis({
@@ -22,7 +24,9 @@ export function useSquadAnalysis({
   stats,
   injuries,
   globalSeasonId,
-  allPlayerRatings
+  allPlayerRatings,
+  leagueFixtures = [],
+  standings = [],
 }: UseSquadAnalysisProps) {
   const [analyzedLimit, setAnalyzedLimit] = React.useState(5);
 
@@ -63,7 +67,9 @@ export function useSquadAnalysis({
         teamAvgBaremo,
         matches,
         inFormPlayers,
-        keyPlayerIds
+        keyPlayerIds,
+        leagueFixtures,
+        standings
       );
 
       // Mejoras incrementales
@@ -85,7 +91,7 @@ export function useSquadAnalysis({
     });
 
     return analysisMap;
-  }, [players, playerSeasons, matches, stats, allPlayerRatings, globalSeasonId]);
+  }, [players, playerSeasons, matches, stats, allPlayerRatings, globalSeasonId, leagueFixtures, standings]);
 
   return {
     squadAnalysis,

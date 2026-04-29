@@ -1,11 +1,10 @@
 import React from 'react';
 import {
-  Sparkles,
   ClipboardCheck,
-  TrendingUp,
   Brain,
   Info,
-  History
+  History,
+  Swords
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -15,7 +14,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Player, Match, PlayerStat, Opponent, Season, Field, PlayerSeason, Injury, StandingsEntry, Team } from '../types';
+import { Player, Match, PlayerStat, Opponent, Season, Field, PlayerSeason, Injury, StandingsEntry, Team, LeagueFixture } from '../types';
 import { cn } from '@/lib/utils';
 
 // New Architecture Imports
@@ -25,6 +24,8 @@ import { useSquadAnalysis } from '../features/ai-analysis/hooks/useSquadAnalysis
 import { PredictionCard } from '../features/ai-analysis/components/PredictionCard';
 import { SquadsTab } from '../features/ai-analysis/components/SquadsTab';
 import { AIVsFootballTab } from '../features/ai-analysis/components/AIVsFootballTab';
+import { RivalsAnalysisTab } from '../features/ai-analysis/components/RivalsAnalysisTab';
+import { useRivalThreatAnalysis } from '../features/ai-analysis/hooks/useRivalThreatAnalysis';
 import { RecommendedSquadModal } from '../features/ai-analysis/components/RecommendedSquadModal';
 import { SquadDetailModal } from '../features/ai-analysis/components/SquadDetailModal';
 
@@ -40,11 +41,14 @@ interface AIAnalysisProps {
   injuries: Injury[];
   globalSeasonId: string;
   standings?: StandingsEntry[];
+  leagueFixtures?: LeagueFixture[];
   onNavigateToMatch?: (matchId: string) => void;
 }
 
 export default function AIAnalysis(props: AIAnalysisProps) {
-  const [activeAITab, setActiveAITab] = React.useState<'predictions' | 'squads' | 'history'>('predictions');
+  const [activeAITab, setActiveAITab] = React.useState<
+    'predictions' | 'squads' | 'rivals' | 'history'
+  >('predictions');
   const [recommendedMatchId, setRecommendedMatchId] = React.useState<string | null>(null);
   const [selectedSquadMatchId, setSelectedSquadMatchId] = React.useState<string | null>(null);
 
@@ -59,8 +63,29 @@ export default function AIAnalysis(props: AIAnalysisProps) {
   
   const { squadAnalysis, analyzedLimit, setAnalyzedLimit } = useSquadAnalysis({
     ...props,
-    allPlayerRatings
+    allPlayerRatings,
+    standings: props.standings || [],
   });
+
+  const effectiveSeasonIdForRivals = React.useMemo(() => {
+    if (props.globalSeasonId !== 'all') return props.globalSeasonId;
+    if (props.seasons.length === 0) return '';
+    return [...props.seasons].sort((a, b) => b.startYear - a.startYear)[0].id;
+  }, [props.globalSeasonId, props.seasons]);
+
+  const rivalThreatAnalysis = useRivalThreatAnalysis(
+    effectiveSeasonIdForRivals,
+    props.team,
+    props.opponents,
+    props.matches,
+    props.standings || [],
+    props.leagueFixtures || []
+  );
+
+  const rivalSeasonLabel = React.useMemo(() => {
+    const s = props.seasons.find((x) => x.id === effectiveSeasonIdForRivals);
+    return s?.name ?? (effectiveSeasonIdForRivals || '—');
+  }, [props.seasons, effectiveSeasonIdForRivals]);
 
   const scheduledMatches = React.useMemo(() => {
     return props.matches.filter(m => {
@@ -93,7 +118,7 @@ export default function AIAnalysis(props: AIAnalysisProps) {
     <TooltipProvider>
       <div className="space-y-6">
         {/* Main Content Areas */}
-        <div className="flex bg-gray-50/80 p-1.5 rounded-2xl w-fit border border-gray-100 mb-2">
+        <div className="flex flex-wrap bg-gray-50/80 p-1.5 rounded-2xl gap-1 border border-gray-100 mb-2 max-w-full">
             <div 
                 onClick={() => setActiveAITab('predictions')}
                 className={cn(
@@ -157,6 +182,16 @@ export default function AIAnalysis(props: AIAnalysisProps) {
                 Estudio de Convocatorias
             </div>
             <div 
+                onClick={() => setActiveAITab('rivals')}
+                className={cn(
+                    "flex items-center gap-2 px-6 py-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-wider cursor-pointer select-none",
+                    activeAITab === 'rivals' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-400 hover:text-gray-500"
+                )}
+            >
+                <Swords size={14} />
+                Análisis Rivales
+            </div>
+            <div 
                 onClick={() => setActiveAITab('history')}
                 className={cn(
                     "flex items-center gap-2 px-6 py-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-wider cursor-pointer select-none",
@@ -188,6 +223,13 @@ export default function AIAnalysis(props: AIAnalysisProps) {
               />
             )})}
           </div>
+        ) : activeAITab === 'rivals' ? (
+          <RivalsAnalysisTab
+            rows={rivalThreatAnalysis.rows}
+            managedTeamRow={rivalThreatAnalysis.managedTeamRow}
+            seasonLabel={rivalSeasonLabel}
+            isAllSeasonsNote={props.globalSeasonId === 'all'}
+          />
         ) : activeAITab === 'squads' ? (
           <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
             <CardHeader className="pb-4">

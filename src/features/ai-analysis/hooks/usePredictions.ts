@@ -1,5 +1,5 @@
 import React from 'react';
-import { Player, Match, PlayerStat, Opponent, Season, Field, PlayerSeason, Injury, StandingsEntry } from '../../../types';
+import { Player, Match, PlayerStat, Opponent, Season, Field, PlayerSeason, Injury, StandingsEntry, LeagueFixture } from '../../../types';
 import { 
   BIAS_LEARNING_RATE, 
   CALIBRATION_MATCH_COUNT, 
@@ -21,6 +21,7 @@ import { getStandingsStats } from '../../../lib/standingsUtils';
 import { poisson, getMostProbableScore } from '../../../lib/poisson.ts';
 import { buildSynergyMap, getSynergyKey } from '../../../lib/synergyCalculator';
 import { MatchPrediction, PlayerRating } from '../../../types/aiAnalysis';
+import { applyLeagueFormToPredictionModifiers } from '../../../lib/opponentForm';
 
 interface UsePredictionsProps {
   players: Player[];
@@ -34,6 +35,7 @@ interface UsePredictionsProps {
   globalSeasonId: string;
   standings: StandingsEntry[];
   allPlayerRatings: any[]; // de usePlayerRatings
+  leagueFixtures?: LeagueFixture[];
 }
 
 export function usePredictions({
@@ -47,7 +49,8 @@ export function usePredictions({
   injuries,
   globalSeasonId,
   standings,
-  allPlayerRatings
+  allPlayerRatings,
+  leagueFixtures = [],
 }: UsePredictionsProps) {
 
   return React.useMemo(() => {
@@ -208,6 +211,19 @@ export function usePredictions({
       totalModifierGF *= Math.max(0.8, Math.min(1.2, momentumModGF));
       totalModifierGC *= Math.max(0.8, Math.min(1.2, momentumModGC));
 
+      // 9. Forma del rival (partidos de liga entre equipos del grupo)
+      const leagueAdj = applyLeagueFormToPredictionModifiers(
+        match.opponentId,
+        match.seasonId,
+        leagueFixtures,
+        totalModifierGF,
+        totalModifierGC,
+        reasons,
+        standings
+      );
+      totalModifierGF = leagueAdj.totalModifierGF;
+      totalModifierGC = leagueAdj.totalModifierGC;
+
       // ─── CLAMP GLOBAL DE MODIFICADORES ───────────────────────────────────────
       const CLAMP_MAX = 2.0;
       const CLAMP_MIN = 0.35;
@@ -296,5 +312,5 @@ export function usePredictions({
     });
 
     return predictionMap;
-  }, [players, matches, stats, opponents, globalSeasonId, standings, allPlayerRatings, playerSeasons, injuries]);
+  }, [players, matches, stats, opponents, globalSeasonId, standings, allPlayerRatings, playerSeasons, injuries, leagueFixtures]);
 }

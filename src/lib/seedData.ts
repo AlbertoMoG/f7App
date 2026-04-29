@@ -1,23 +1,37 @@
-import { collection, addDoc, getDocs, query, limit } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, addDoc, getDocs, query, where, limit } from 'firebase/firestore';
+import { db, auth } from '../firebase';
 import { Position, Attendance, MatchStatus } from '../types';
 
 export const seedDatabase = async () => {
   try {
-    // Check if there are already players to avoid double seeding
-    const playersSnapshot = await getDocs(collection(db, 'players'));
-    if (!playersSnapshot.empty) {
-      console.log('Database already seeded');
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      console.log('No authenticated user; cannot seed');
       return false;
     }
 
-    // 1. Team
-    const teamRef = await addDoc(collection(db, 'team'), { 
-      name: 'Los Galácticos FC', 
-      shieldUrl: 'https://images.unsplash.com/photo-1522778119026-d647f0596c20?w=400&h=400&fit=crop',
-      ownerId: 'seeded-owner'
-    });
-    const teamId = teamRef.id;
+    let teamId: string;
+    const existingTeamSnap = await getDocs(
+      query(collection(db, 'team'), where('ownerId', '==', uid), limit(1))
+    );
+    if (!existingTeamSnap.empty) {
+      teamId = existingTeamSnap.docs[0].id;
+    } else {
+      const teamRef = await addDoc(collection(db, 'team'), {
+        name: 'Los Galácticos FC',
+        shieldUrl: 'https://images.unsplash.com/photo-1522778119026-d647f0596c20?w=400&h=400&fit=crop',
+        ownerId: uid
+      });
+      teamId = teamRef.id;
+    }
+
+    const playersSnapshot = await getDocs(
+      query(collection(db, 'players'), where('teamId', '==', teamId), limit(1))
+    );
+    if (!playersSnapshot.empty) {
+      console.log('Database already seeded for this team');
+      return false;
+    }
 
     // 2. Seasons
     const season1Ref = await addDoc(collection(db, 'seasons'), { name: 'Temporada 2025/2026', startYear: 2025, teamId });

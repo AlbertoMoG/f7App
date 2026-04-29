@@ -12,9 +12,16 @@ View your app in AI Studio: https://ai.studio/apps/56263d1d-10e8-4355-a232-96b0f
 
 **Prerequisites:**  Node.js
 
-
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. If you are on Windows, run:
+   `npm run setup:win`
+3. Create `.env.local` from [.env.example](.env.example) and fill values:
+   - `GEMINI_API_KEY`
+   - `VITE_FIREBASE_API_KEY`
+   - `VITE_FIREBASE_AUTH_DOMAIN`
+   - `VITE_FIREBASE_PROJECT_ID`
+   - `VITE_FIREBASE_APP_ID`
+4. (Optional) Add `VITE_FIREBASE_STORAGE_BUCKET` and `VITE_FIREBASE_MESSAGING_SENDER_ID`
+5. Run the app:
    `npm run dev`

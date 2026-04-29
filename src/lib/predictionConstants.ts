@@ -35,6 +35,15 @@ export const STANDINGS_WEIGHT = 0.3;
 /** Clamp del modificador de clasificación (min, max) */
 export const STANDINGS_MODIFIER_CLAMP = { MIN: 0.7, MAX: 1.3 };
 
+/** Partidos de liga neutra considerados para “forma reciente” del rival */
+export const OPPONENT_LEAGUE_FORM_WINDOW = 5;
+
+/** Clamp del ratio forma reciente vs temporada (evita saltos bruscos) */
+export const OPPONENT_FORM_TREND_CLAMP = { MIN: 0.88, MAX: 1.12 };
+
+/** Peso mín/máx al ponderar partidos del rival según fortaleza del oponente enfrentado */
+export const OPPONENT_STRENGTH_WEIGHT_CLAMP = { MIN: 0.78, MAX: 1.22 };
+
 /** Número de jugadores mínimos para activar la predicción */
 export const MIN_PLAYERS_FOR_PREDICTION = 5;
 

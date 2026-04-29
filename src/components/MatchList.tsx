@@ -30,7 +30,8 @@ import {
   ShieldCheck,
   XCircle,
   HelpCircle,
-  AlertCircle
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { Button } from '@/components/ui/button';
@@ -64,7 +65,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Player, Match, PlayerStat, Season, Opponent, Team, Field, Lineup, Injury, PlayerSeason } from '../types';
+import { Player, Match, PlayerStat, Season, Opponent, Team, Field, Lineup, Injury, PlayerSeason, StandingsEntry } from '../types';
 import { 
   format, 
   startOfMonth, 
@@ -82,6 +83,8 @@ import { es } from 'date-fns/locale';
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { standingsEntryHasManualAdjustment } from '../lib/leagueStandingsAudit';
+import { resetManualStandingsDeltaForSeason } from '../lib/resetManualStandingsForSeason';
 
 interface MatchListProps {
   team: Team | null;
@@ -101,6 +104,7 @@ interface MatchListProps {
   onSetActiveTab: (tab: string, matchId?: string) => void;
   initialMatchId?: string | null;
   onClearInitialMatchId?: () => void;
+  standings: StandingsEntry[];
 }
 
 /**
@@ -122,7 +126,8 @@ export default function MatchList({
   globalSeasonId,
   onSetActiveTab,
   initialMatchId,
-  onClearInitialMatchId
+  onClearInitialMatchId,
+  standings,
 }: MatchListProps) {
   const navigate = useNavigate();
   const [filterOpponent, setFilterOpponent] = React.useState<string>('all');
@@ -137,7 +142,49 @@ export default function MatchList({
   const [isShareModalOpen, setIsShareModalOpen] = React.useState(false);
   const [noConvocatoriaModalOpen, setNoConvocatoriaModalOpen] = React.useState(false);
   const [showUpcoming, setShowUpcoming] = React.useState(true);
+  const [syncingStandings, setSyncingStandings] = React.useState(false);
   const instagramPostRef = React.useRef<HTMLDivElement>(null);
+
+  const standingsSeasonId =
+    globalSeasonId !== 'all' && globalSeasonId ? globalSeasonId : '';
+
+  const manualStandingsRowsCount = React.useMemo(() => {
+    if (!team || !standingsSeasonId) return 0;
+    return standings.filter(
+      (s) =>
+        s.teamId === team.id &&
+        s.seasonId === standingsSeasonId &&
+        standingsEntryHasManualAdjustment(s)
+    ).length;
+  }, [team, standingsSeasonId, standings]);
+
+  const handleSyncClassificationFromResults = async () => {
+    if (!team || !standingsSeasonId) {
+      toast.error('Selecciona una temporada en el menú lateral');
+      return;
+    }
+    if (manualStandingsRowsCount === 0) {
+      toast.info('No hay ajustes manuales guardados; la clasificación ya se basa en los resultados.');
+      return;
+    }
+    if (
+      !confirm(
+        `Se pondrán a cero ${manualStandingsRowsCount} ajuste(s) manual(es) en la clasificación de esta temporada. Los números quedarán alineados con los resultados registrados en partidos y liga entre equipos. ¿Continuar?`
+      )
+    ) {
+      return;
+    }
+    setSyncingStandings(true);
+    try {
+      await resetManualStandingsDeltaForSeason(team, standingsSeasonId, standings);
+      toast.success('Clasificación sincronizada con los resultados');
+    } catch (e) {
+      console.error(e);
+      toast.error('No se pudo actualizar la clasificación');
+    } finally {
+      setSyncingStandings(false);
+    }
+  };
 
   React.useEffect(() => {
     if (initialMatchId) {
@@ -276,7 +323,37 @@ export default function MatchList({
           <h2 className="text-3xl font-bold tracking-tight">Historial de Partidos</h2>
           <p className="text-gray-500">Registra resultados y estadísticas individuales.</p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2">
+        <div className="flex flex-col sm:flex-row gap-2 flex-wrap">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cn(
+                    'border-blue-200 text-blue-700 hover:bg-blue-50 rounded-xl h-11 px-4',
+                    (!team || !standingsSeasonId || syncingStandings) && 'opacity-60'
+                  )}
+                  disabled={!team || !standingsSeasonId || syncingStandings}
+                  onClick={handleSyncClassificationFromResults}
+                >
+                  {syncingStandings ? (
+                    <Loader2 size={18} className="mr-2 animate-spin shrink-0" />
+                  ) : (
+                    <Trophy size={18} className="mr-2 shrink-0" />
+                  )}
+                  Actualizar clasificación
+                </Button>
+              }
+            />
+            <TooltipContent className="max-w-xs">
+              {team && standingsSeasonId
+                ? manualStandingsRowsCount > 0
+                  ? `Quita los ajustes manuales de standings (${manualStandingsRowsCount}) para esta temporada y deja la tabla como el cálculo por resultados.`
+                  : 'Sin ajustes manuales; la clasificación ya refleja solo resultados.'
+                : 'Elige primero una temporada concreta (no «todas») en el menú lateral.'}
+            </TooltipContent>
+          </Tooltip>
           <Button 
             onClick={handleShareClick}
             variant="outline"

@@ -12,6 +12,28 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function hasTeamIdInRequest() {
+      return 'teamId' in request.resource.data && request.resource.data.teamId is string;
+    }
+
+    function hasTeamIdInResource() {
+      return 'teamId' in resource.data && resource.data.teamId is string;
+    }
+
+    function isTeamOwnerById(teamId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/team/$(teamId)) &&
+        get(/databases/$(database)/documents/team/$(teamId)).data.ownerId == request.auth.uid;
+    }
+
+    function canReadByTeamId() {
+      return hasTeamIdInResource() && isTeamOwnerById(resource.data.teamId);
+    }
+
+    function canWriteByTeamId() {
+      return hasTeamIdInRequest() && isTeamOwnerById(request.resource.data.teamId);
+    }
+
     function hasRequiredFields(fields) {
       return request.resource.data.keys().hasAll(fields);
     }
@@ -59,7 +81,38 @@ service cloud.firestore {
       return hasRequiredFields(['seasonId', 'date', 'opponentId', 'status']) &&
              isValidString('seasonId', 1, 100) &&
              isValidString('opponentId', 1, 100) &&
-             request.resource.data.status in ['scheduled', 'completed'];
+             request.resource.data.status in ['scheduled', 'completed'] &&
+             (
+               request.resource.data.status != 'completed' ||
+               (
+                 'scoreTeam' in request.resource.data &&
+                 'scoreOpponent' in request.resource.data &&
+                 request.resource.data.scoreTeam is number &&
+                 request.resource.data.scoreOpponent is number &&
+                 request.resource.data.scoreTeam >= 0 &&
+                 request.resource.data.scoreOpponent >= 0
+               )
+             );
+    }
+
+    function isValidLeagueFixture() {
+      return hasRequiredFields(['seasonId', 'date', 'homeOpponentId', 'awayOpponentId', 'status']) &&
+             isValidString('seasonId', 1, 100) &&
+             isValidString('homeOpponentId', 1, 100) &&
+             isValidString('awayOpponentId', 1, 100) &&
+             request.resource.data.homeOpponentId != request.resource.data.awayOpponentId &&
+             request.resource.data.status in ['scheduled', 'completed'] &&
+             (
+               request.resource.data.status != 'completed' ||
+               (
+                 'scoreHome' in request.resource.data &&
+                 'scoreAway' in request.resource.data &&
+                 request.resource.data.scoreHome is number &&
+                 request.resource.data.scoreAway is number &&
+                 request.resource.data.scoreHome >= 0 &&
+                 request.resource.data.scoreAway >= 0
+               )
+             );
     }
 
     function isValidPlayerStat() {
@@ -67,7 +120,7 @@ service cloud.firestore {
              isValidString('playerId', 1, 100) &&
              isValidString('matchId', 1, 100) &&
              isValidString('seasonId', 1, 100) &&
-             request.resource.data.attendance in ['attending', 'notAttending', 'noResponse'];
+             request.resource.data.attendance in ['attending', 'notAttending', 'noResponse', 'justified', 'doubtful'];
     }
 
     function isValidInjury() {
@@ -91,61 +144,128 @@ service cloud.firestore {
              isValidNumber('points', 0, 300);
     }
 
+    function isValidField() {
+      return hasRequiredFields(['name']) &&
+             isValidString('name', 1, 100) &&
+             (!('location' in request.resource.data) ||
+               request.resource.data.location == null ||
+               (request.resource.data.location is string && request.resource.data.location.size() <= 500));
+    }
+
+    function isValidSeasonFees() {
+      return hasRequiredFields([
+               'teamId', 'seasonId', 'ficha', 'inscripcion', 'seguro',
+               'arbitroPerMatch', 'expectedMatches', 'installments', 'previousBalance'
+             ]) &&
+             isValidString('teamId', 1, 100) &&
+             isValidString('seasonId', 1, 100) &&
+             isValidNumber('ficha', 0, 100000) &&
+             isValidNumber('inscripcion', 0, 100000) &&
+             isValidNumber('seguro', 0, 100000) &&
+             isValidNumber('arbitroPerMatch', 0, 10000) &&
+             isValidNumber('expectedMatches', 0, 500) &&
+             isValidNumber('installments', 1, 100) &&
+             isValidNumber('previousBalance', 0, 1000000);
+    }
+
+    function isValidPlayerPayment() {
+      return hasRequiredFields(['teamId', 'playerId', 'seasonId', 'amountPaid']) &&
+             isValidString('teamId', 1, 100) &&
+             isValidString('playerId', 1, 100) &&
+             isValidString('seasonId', 1, 100) &&
+             isValidNumber('amountPaid', 0, 1000000);
+    }
+
     // ===============================================================
     // Match Rules
     // ===============================================================
+    match /team/{teamId} {
+      allow read: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+      allow create: if isAuthenticated() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        hasRequiredFields(['name', 'ownerId']) &&
+        isValidString('name', 1, 100);
+      allow update, delete: if isAuthenticated() && resource.data.ownerId == request.auth.uid;
+    }
+
     match /players/{playerId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidPlayer();
-      allow delete: if isAuthenticated();
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId() && isValidPlayer();
+      allow delete: if canReadByTeamId();
     }
 
     match /playerSeasons/{psId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId();
+      allow delete: if canReadByTeamId();
     }
 
     match /injuries/{injuryId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidInjury();
-      allow delete: if isAuthenticated();
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId() && isValidInjury();
+      allow delete: if canReadByTeamId();
     }
 
     match /seasons/{seasonId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidSeason();
-      allow delete: if isAuthenticated();
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId() && isValidSeason();
+      allow delete: if canReadByTeamId();
     }
 
     match /opponents/{opponentId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidOpponent();
-      allow delete: if isAuthenticated();
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId() && isValidOpponent();
+      allow delete: if canReadByTeamId();
     }
 
     match /matches/{matchId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidMatch();
-      allow delete: if isAuthenticated();
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId() && isValidMatch();
+      allow delete: if canReadByTeamId();
+    }
+
+    match /leagueFixtures/{fixtureId} {
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId() && isValidLeagueFixture();
+      allow delete: if canReadByTeamId();
     }
 
     match /playerStats/{statId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidPlayerStat();
-      allow delete: if isAuthenticated();
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId() && isValidPlayerStat();
+      allow delete: if canReadByTeamId();
     }
 
     match /lineups/{lineupId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId();
+      allow delete: if canReadByTeamId();
     }
 
     match /standings/{standingId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidStanding();
-      allow delete: if isAuthenticated();
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId() && isValidStanding();
+      allow delete: if canReadByTeamId();
+    }
+
+    match /fields/{fieldId} {
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId() && isValidField();
+      allow delete: if canReadByTeamId();
+    }
+
+    match /seasonFees/{seasonFeesId} {
+      allow read: if hasTeamIdInResource() && isTeamOwnerById(resource.data.teamId);
+      allow create, update: if canWriteByTeamId() &&
+        isValidSeasonFees() &&
+        request.resource.data.seasonId == seasonFeesId;
+      allow delete: if hasTeamIdInResource() && isTeamOwnerById(resource.data.teamId);
+    }
+
+    match /playerPayments/{paymentId} {
+      allow read: if canReadByTeamId();
+      allow create, update: if canWriteByTeamId() && isValidPlayerPayment();
+      allow delete: if canReadByTeamId();
     }
   }
 }

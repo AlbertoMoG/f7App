@@ -111,6 +111,20 @@ export interface Match {
   } | null;
 }
 
+/** Neutral league fixture between two opponents (group / third-party results). */
+export interface LeagueFixture {
+  id: string;
+  teamId: string;
+  seasonId: string;
+  homeOpponentId: string;
+  awayOpponentId: string;
+  date: string;
+  status: MatchStatus;
+  scoreHome?: number | null;
+  scoreAway?: number | null;
+  round?: string | null;
+}
+
 export interface PlayerStat {
   id: string;
   teamId: string;

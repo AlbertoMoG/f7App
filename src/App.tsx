@@ -22,7 +22,7 @@ import {
   User
 } from 'firebase/auth';
 import { db, auth } from './firebase';
-import { Player, Season, Opponent, Match, PlayerStat, Lineup, Team, Field, PlayerSeason, Injury, SeasonFeesInput, StandingsEntry } from './types';
+import { Player, Season, Opponent, Match, PlayerStat, Lineup, Team, Field, PlayerSeason, Injury, SeasonFeesInput, StandingsEntry, LeagueFixture } from './types';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import AIAnalysis from './components/AIAnalysis';
@@ -62,6 +62,7 @@ export default function App() {
   const [fields, setFields] = useState<Field[]>([]);
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [standings, setStandings] = useState<StandingsEntry[]>([]);
+  const [leagueFixtures, setLeagueFixtures] = useState<LeagueFixture[]>([]);
 
   // Default season selection logic - Initialize only once when seasons are loaded
   const initialSeasonSet = React.useRef(false);
@@ -97,6 +98,7 @@ export default function App() {
     let unsubPlayerSeasons: any;
     let unsubInjuries: any;
     let unsubStandings: any;
+    let unsubLeagueFixtures: any;
 
     const unsubTeam = onSnapshot(query(collection(db, 'team'), where('ownerId', '==', user.uid)), async (snapshot) => {
       if (!snapshot.empty) {
@@ -144,55 +146,17 @@ export default function App() {
           setStandings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as StandingsEntry)));
         }, (err) => handleFirestoreError(err, OperationType.LIST, 'standings'));
 
+        unsubLeagueFixtures = onSnapshot(query(collection(db, 'leagueFixtures'), where('teamId', '==', currentTeam.id)), (snap) => {
+          setLeagueFixtures(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as LeagueFixture)));
+        }, (err) => handleFirestoreError(err, OperationType.LIST, 'leagueFixtures'));
+
       } else {
-        // Create default team and run migration
+        // Create default team for this authenticated user
         try {
-          const newTeamRef = await addDoc(collection(db, 'team'), { name: 'Mi Equipo Principal', ownerId: user.uid });
-          const newTeamId = newTeamRef.id;
-          
-          // Run migration for all existing data without teamId
-          const batch = writeBatch(db);
-          
-          // Fetch all existing records
-          const collectionsToMigrate = ['players', 'seasons', 'opponents', 'matches', 'playerStats', 'lineups', 'fields'];
-          
-          for (const collName of collectionsToMigrate) {
-            const snap = await getDocs(collection(db, collName));
-            snap.docs.forEach(docSnap => {
-              const data = docSnap.data();
-              const update: any = {};
-              if (!data.teamId) {
-                update.teamId = newTeamId;
-              }
-              if (collName === 'seasons' && data.startYear === undefined) {
-                update.startYear = new Date().getFullYear();
-              }
-              if (Object.keys(update).length > 0) {
-                batch.update(docSnap.ref, update);
-              }
-            });
-          }
-
-          // Migrate seasonIds to playerSeasons
-          const playersSnap = await getDocs(collection(db, 'players'));
-          playersSnap.docs.forEach(docSnap => {
-            const data = docSnap.data();
-            if (data.seasonIds && Array.isArray(data.seasonIds)) {
-              data.seasonIds.forEach((seasonId: string) => {
-                const psRef = doc(collection(db, 'playerSeasons'));
-                batch.set(psRef, {
-                  teamId: newTeamId,
-                  playerId: docSnap.id,
-                  seasonId: seasonId
-                });
-              });
-            }
-          });
-
-          await batch.commit();
-          toast.success('Datos migrados a tu nuevo equipo correctamente');
+          await addDoc(collection(db, 'team'), { name: 'Mi Equipo Principal', ownerId: user.uid });
+          toast.success('Equipo por defecto creado correctamente');
         } catch (err) {
-          console.error("Migration error:", err);
+          console.error("Default team creation error:", err);
           toast.error("Error al crear el equipo por defecto");
         }
       }
@@ -210,6 +174,7 @@ export default function App() {
       if (unsubPlayerSeasons) unsubPlayerSeasons();
       if (unsubInjuries) unsubInjuries();
       if (unsubStandings) unsubStandings();
+      if (unsubLeagueFixtures) unsubLeagueFixtures();
     };
   }, [user]);
 
@@ -237,7 +202,8 @@ export default function App() {
 
   const updateTeam = async (t: Team) => {
     try {
-      await updateDoc(doc(db, 'team', t.id), { ...t });
+      const { id, ...teamData } = t;
+      await updateDoc(doc(db, 'team', t.id), teamData);
       toast.success('Ajustes del equipo actualizados');
     } catch (error) {
       toast.error('Error al actualizar el equipo');
@@ -282,7 +248,11 @@ export default function App() {
       batch.update(doc(db, 'players', p.id), { ...p });
       
       // 2. Update player seasons
-      const psQuery = query(collection(db, 'playerSeasons'), where('playerId', '==', p.id));
+      const psQuery = query(
+        collection(db, 'playerSeasons'),
+        where('teamId', '==', team.id),
+        where('playerId', '==', p.id)
+      );
       const psSnap = await getDocs(psQuery);
       
       const existingSeasonIds = psSnap.docs.map(d => d.data().seasonId);
@@ -315,12 +285,17 @@ export default function App() {
   };
 
   const deletePlayer = async (id: string) => {
+    if (!team) return;
     try {
       const batch = writeBatch(db);
       batch.delete(doc(db, 'players', id));
       
       // Delete associated playerSeasons
-      const psQuery = query(collection(db, 'playerSeasons'), where('playerId', '==', id));
+      const psQuery = query(
+        collection(db, 'playerSeasons'),
+        where('teamId', '==', team.id),
+        where('playerId', '==', id)
+      );
       const psSnap = await getDocs(psQuery);
       psSnap.docs.forEach(d => batch.delete(d.ref));
 
@@ -378,7 +353,11 @@ export default function App() {
       batch.update(seasonRef, { name, division, startYear });
       
       // 2. Actualizar asociación de jugadores (PlayerSeason)
-      const psQuery = query(collection(db, 'playerSeasons'), where('seasonId', '==', id));
+      const psQuery = query(
+        collection(db, 'playerSeasons'),
+        where('teamId', '==', team.id),
+        where('seasonId', '==', id)
+      );
       const psSnap = await getDocs(psQuery);
       
       const existingPlayerIds = psSnap.docs.map(d => d.data().playerId);
@@ -403,7 +382,11 @@ export default function App() {
       });
 
       // 3. Actualizar asociación de rivales
-      const opponentsWithSeasonQuery = query(collection(db, 'opponents'), where('seasonIds', 'array-contains', id));
+      const opponentsWithSeasonQuery = query(
+        collection(db, 'opponents'),
+        where('teamId', '==', team.id),
+        where('seasonIds', 'array-contains', id)
+      );
       const opponentsWithSeasonSnap = await getDocs(opponentsWithSeasonQuery);
       
       opponentsWithSeasonSnap.docs.forEach(d => {
@@ -427,23 +410,36 @@ export default function App() {
   };
 
   const deleteSeason = async (id: string) => {
+    if (!team) return;
     try {
       const batch = writeBatch(db);
 
       // 1. Remove season from playerSeasons
-      const psQuery = query(collection(db, 'playerSeasons'), where('seasonId', '==', id));
+      const psQuery = query(
+        collection(db, 'playerSeasons'),
+        where('teamId', '==', team.id),
+        where('seasonId', '==', id)
+      );
       const psSnap = await getDocs(psQuery);
       psSnap.docs.forEach(d => batch.delete(d.ref));
 
       // 2. Remove season from opponents
-      const opponentsQuery = query(collection(db, 'opponents'), where('seasonIds', 'array-contains', id));
+      const opponentsQuery = query(
+        collection(db, 'opponents'),
+        where('teamId', '==', team.id),
+        where('seasonIds', 'array-contains', id)
+      );
       const opponentsSnap = await getDocs(opponentsQuery);
       opponentsSnap.docs.forEach(d => {
         batch.update(d.ref, { seasonIds: arrayRemove(id) });
       });
 
       // 3. Delete matches of this season
-      const matchesQuery = query(collection(db, 'matches'), where('seasonId', '==', id));
+      const matchesQuery = query(
+        collection(db, 'matches'),
+        where('teamId', '==', team.id),
+        where('seasonId', '==', id)
+      );
       const matchesSnap = await getDocs(matchesQuery);
       const matchIds = matchesSnap.docs.map(d => d.id);
       matchesSnap.docs.forEach(d => {
@@ -451,7 +447,11 @@ export default function App() {
       });
 
       // 4. Delete playerStats of this season
-      const statsQuery = query(collection(db, 'playerStats'), where('seasonId', '==', id));
+      const statsQuery = query(
+        collection(db, 'playerStats'),
+        where('teamId', '==', team.id),
+        where('seasonId', '==', id)
+      );
       const statsSnap = await getDocs(statsQuery);
       statsSnap.docs.forEach(d => {
         batch.delete(d.ref);
@@ -466,7 +466,11 @@ export default function App() {
         };
         const matchIdChunks = chunkArray(matchIds, 10);
         for (const chunk of matchIdChunks) {
-          const lineupsQuery = query(collection(db, 'lineups'), where('matchId', 'in', chunk));
+          const lineupsQuery = query(
+            collection(db, 'lineups'),
+            where('teamId', '==', team.id),
+            where('matchId', 'in', chunk)
+          );
           const lineupsSnap = await getDocs(lineupsQuery);
           lineupsSnap.docs.forEach(d => {
             batch.delete(d.ref);
@@ -570,7 +574,8 @@ export default function App() {
 
   const updateMatch = async (m: Match) => {
     try {
-      await updateDoc(doc(db, 'matches', m.id), { ...m });
+      const { id, ...matchData } = m;
+      await updateDoc(doc(db, 'matches', m.id), matchData);
       toast.success('Partido actualizado');
     } catch (error) {
       toast.error('Error al actualizar partido');
@@ -579,9 +584,14 @@ export default function App() {
   };
 
   const deleteMatch = async (id: string) => {
+    if (!team) return;
     try {
       // 1. Eliminar físicamente las estadísticas de los jugadores asociadas a este partido
-      const statsQuery = query(collection(db, 'playerStats'), where('matchId', '==', id));
+      const statsQuery = query(
+        collection(db, 'playerStats'),
+        where('teamId', '==', team.id),
+        where('matchId', '==', id)
+      );
       const statsSnapshot = await getDocs(statsQuery);
       
       const batch = writeBatch(db);
@@ -606,7 +616,8 @@ export default function App() {
     try {
       for (const stat of newStats) {
         if (stat.id) {
-          await updateDoc(doc(db, 'playerStats', stat.id), { ...stat });
+          const { id, ...statData } = stat;
+          await updateDoc(doc(db, 'playerStats', stat.id), statData);
         } else {
           const { id, ...rest } = stat;
           await addDoc(collection(db, 'playerStats'), { ...rest, teamId: team.id });
@@ -690,7 +701,8 @@ export default function App() {
 
   const updateInjury = async (injury: Injury) => {
     try {
-      await updateDoc(doc(db, 'injuries', injury.id), { ...injury });
+      const { id, ...injuryData } = injury;
+      await updateDoc(doc(db, 'injuries', injury.id), injuryData);
       toast.success('Lesión actualizada');
     } catch (error) {
       toast.error('Error al actualizar lesión');
@@ -748,6 +760,7 @@ export default function App() {
             >
               {activeTab === 'dashboard' && (
                 <Dashboard 
+                  teamId={team?.id}
                   players={players} 
                   playerSeasons={playerSeasons}
                   matches={matches} 
@@ -773,6 +786,7 @@ export default function App() {
                   injuries={injuries}
                   globalSeasonId={globalSeasonId}
                   standings={standings}
+                  leagueFixtures={leagueFixtures}
                   onNavigateToMatch={(matchId) => {
                     setSelectedMatchId(matchId);
                     setActiveTab('matches');
@@ -787,6 +801,11 @@ export default function App() {
                   standings={standings}
                   globalSeasonId={globalSeasonId}
                   seasons={seasons}
+                  leagueFixtures={leagueFixtures}
+                  onOpenMatch={(matchId) => {
+                    setSelectedMatchId(matchId);
+                    setActiveTab('matches');
+                  }}
                 />
               )}
               {activeTab === 'players' && (
@@ -820,6 +839,7 @@ export default function App() {
                   playerSeasons={playerSeasons}
                   injuries={injuries}
                   globalSeasonId={globalSeasonId}
+                  standings={standings}
                   onSetActiveTab={(tab, matchId) => {
                     setActiveTab(tab);
                     if (matchId) setSelectedMatchId(matchId);
