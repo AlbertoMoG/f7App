@@ -22,7 +22,7 @@ import { AppActionsProvider, useAppActions } from './context/AppActionsContext';
 import { NavigationProvider, useNavigation } from './context/NavigationContext';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
-import AIAnalysis from './components/AIAnalysis';
+import InteligenciaIAWorkspace from './components/InteligenciaIAWorkspace';
 import StandingsView from './components/StandingsView';
 import PlayerList from './components/PlayerList';
 import MatchList from './components/MatchList';
@@ -194,8 +194,8 @@ function AppShell({ user, onLogout }: AppShellProps) {
                   standings={standings}
                 />
               )}
-              {activeTab === 'ai-analysis' && (
-                <AIAnalysis
+              {activeTab === 'inteligencia-ia' && (
+                <InteligenciaIAWorkspace
                   team={team}
                   players={players}
                   playerSeasons={playerSeasons}
@@ -232,6 +232,9 @@ function AppShell({ user, onLogout }: AppShellProps) {
                   seasons={seasons}
                   injuries={injuries}
                   opponents={opponents}
+                  standings={standings}
+                  fields={fields}
+                  leagueFixtures={leagueFixtures}
                   globalSeasonId={globalSeasonId}
                   onAddPlayer={addPlayer}
                   onUpdatePlayer={updatePlayer}

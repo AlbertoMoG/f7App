@@ -16,6 +16,11 @@ export interface MatchPrediction {
   probabilities: MatchProbabilities;
   recommendedSquad: Player[];
   recommendedProbabilities: MatchProbabilities;
+  /** λ de goles del modelo antes de Poisson (sesgo rival / convocatoria en el builder). */
+  modelPredGF: number;
+  modelPredGC: number;
+  /** Cupo de jugadores de campo en la convocatoria ideal (10–12), elegido por mayor baremo medio con 2-3-1. */
+  recommendedOutfieldSlots: number;
 }
 
 export type ReasonType = 'positive' | 'negative' | 'neutral';

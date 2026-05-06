@@ -2,6 +2,11 @@ import type { LeagueFixture, StandingsEntry } from '../types';
 import {
   OPPONENT_LEAGUE_FORM_WINDOW,
   OPPONENT_FORM_TREND_CLAMP,
+  RIVAL_LEAGUE_INDEX_WEIGHT,
+  RIVAL_WIN_STREAK_GC_BOOST,
+  RIVAL_LOSS_STREAK_GF_BOOST,
+  RIVAL_STREAK_THRESHOLD,
+  MIN_RIVAL_FIXTURES_FOR_INDEX,
 } from './predictionConstants';
 import { strengthWeightForOpponent } from './opponentStrength';
 import { compareLeagueFixturesRecentFirst } from './leagueFixtureOrder';
@@ -171,4 +176,153 @@ export function applyLeagueFormToPredictionModifiers(
   }
 
   return { totalModifierGF: nextGF, totalModifierGC: nextGC };
+}
+
+/**
+ * Datos crudos del índice ataque/defensa del rival vs media de liga + racha consecutiva.
+ * Exportado para uso en rivalThreatScore.ts y en el motor de predicción.
+ */
+export interface RivalLeagueIndexData {
+  /** Media de goles a favor del rival en sus fixtures de liga de la temporada */
+  rivalAvgGF: number;
+  /** Media de goles en contra del rival en sus fixtures de liga de la temporada */
+  rivalAvgGA: number;
+  /** Media de goles por equipo por partido en toda la liga */
+  leagueAvgGoals: number;
+  /** rivalAvgGF / leagueAvgGoals  (>1 = atacan más que la media) */
+  attackIndex: number;
+  /** rivalAvgGA / leagueAvgGoals  (>1 = encajan más que la media) */
+  defenseIndex: number;
+  /** Victorias consecutivas contadas desde el partido más reciente (0 si la racha se cortó) */
+  consecutiveWins: number;
+  /** Derrotas consecutivas contadas desde el partido más reciente (0 si la racha se cortó) */
+  consecutiveLosses: number;
+  /** Número de fixtures del rival usados para el cálculo */
+  sampleGames: number;
+}
+
+/**
+ * Calcula el índice de ataque/defensa del rival vs la media de goles de liga
+ * y la racha de victorias/derrotas consecutivas más reciente.
+ * Devuelve null si no hay suficientes datos (MIN_RIVAL_FIXTURES_FOR_INDEX).
+ */
+export function getRivalLeagueIndexData(
+  opponentId: string,
+  seasonId: string,
+  leagueFixtures: LeagueFixture[],
+): RivalLeagueIndexData | null {
+  const completedInSeason = leagueFixtures.filter(
+    f =>
+      f.seasonId === seasonId &&
+      f.status === 'completed' &&
+      f.scoreHome != null &&
+      f.scoreAway != null,
+  );
+
+  if (completedInSeason.length < MIN_RIVAL_FIXTURES_FOR_INDEX) return null;
+
+  const rivalFixtures = completedInSeason.filter(
+    f => f.homeOpponentId === opponentId || f.awayOpponentId === opponentId,
+  );
+
+  if (rivalFixtures.length < MIN_RIVAL_FIXTURES_FOR_INDEX) return null;
+
+  // Media de goles por equipo en toda la liga (home + away / 2 por fixture)
+  const totalLeagueGoals = completedInSeason.reduce(
+    (acc, f) => acc + f.scoreHome! + f.scoreAway!, 0,
+  );
+  const leagueAvgGoals = totalLeagueGoals / (2 * completedInSeason.length);
+
+  // Medias GF y GA del rival
+  const { totalGF, totalGA } = rivalFixtures.reduce(
+    (acc, f) => {
+      if (f.homeOpponentId === opponentId) {
+        return { totalGF: acc.totalGF + f.scoreHome!, totalGA: acc.totalGA + f.scoreAway! };
+      }
+      return { totalGF: acc.totalGF + f.scoreAway!, totalGA: acc.totalGA + f.scoreHome! };
+    },
+    { totalGF: 0, totalGA: 0 },
+  );
+  const rivalAvgGF = totalGF / rivalFixtures.length;
+  const rivalAvgGA = totalGA / rivalFixtures.length;
+
+  const attackIndex  = leagueAvgGoals > 0 ? rivalAvgGF / leagueAvgGoals : 1;
+  const defenseIndex = leagueAvgGoals > 0 ? rivalAvgGA / leagueAvgGoals : 1;
+
+  // Racha consecutiva desde el más reciente
+  const sorted = [...rivalFixtures].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+  );
+  const isWin  = (f: LeagueFixture) =>
+    f.homeOpponentId === opponentId ? f.scoreHome! > f.scoreAway! : f.scoreAway! > f.scoreHome!;
+  const isLoss = (f: LeagueFixture) =>
+    f.homeOpponentId === opponentId ? f.scoreHome! < f.scoreAway! : f.scoreAway! < f.scoreHome!;
+
+  let consecutiveWins = 0;
+  for (const f of sorted) {
+    if (isWin(f)) consecutiveWins++;
+    else break;
+  }
+  let consecutiveLosses = 0;
+  for (const f of sorted) {
+    if (isLoss(f)) consecutiveLosses++;
+    else break;
+  }
+
+  return {
+    rivalAvgGF, rivalAvgGA, leagueAvgGoals,
+    attackIndex, defenseIndex,
+    consecutiveWins, consecutiveLosses,
+    sampleGames: rivalFixtures.length,
+  };
+}
+
+/**
+ * Aplica el índice de liga del rival a los modificadores de predicción (paso 10).
+ * Señal ①: índice ataque/defensa vs media de liga.
+ * Señal ②: racha consecutiva de victorias/derrotas (≥ RIVAL_STREAK_THRESHOLD).
+ */
+export function applyRivalLeagueIndexToModifiers(
+  opponentId: string,
+  seasonId: string,
+  leagueFixtures: LeagueFixture[],
+  totalModifierGF: number,
+  totalModifierGC: number,
+  reasons: string[],
+): { totalModifierGF: number; totalModifierGC: number } {
+  const data = getRivalLeagueIndexData(opponentId, seasonId, leagueFixtures);
+  if (!data) return { totalModifierGF, totalModifierGC };
+
+  const {
+    attackIndex, defenseIndex, rivalAvgGF, rivalAvgGA,
+    leagueAvgGoals, consecutiveWins, consecutiveLosses, sampleGames,
+  } = data;
+
+  // Señal ①
+  totalModifierGC *= 1 + (attackIndex  - 1) * RIVAL_LEAGUE_INDEX_WEIGHT;
+  totalModifierGF *= 1 + (defenseIndex - 1) * RIVAL_LEAGUE_INDEX_WEIGHT;
+
+  if (attackIndex > 1.1) {
+    reasons.push(`Rival goleador en liga (${rivalAvgGF.toFixed(1)} GF vs ${leagueAvgGoals.toFixed(1)} media).`);
+  } else if (attackIndex < 0.9) {
+    reasons.push(`Rival con escaso gol en liga (${rivalAvgGF.toFixed(1)} GF vs ${leagueAvgGoals.toFixed(1)} media).`);
+  }
+  if (defenseIndex > 1.1) {
+    reasons.push(`Rival poroso en liga (${rivalAvgGA.toFixed(1)} GC vs ${leagueAvgGoals.toFixed(1)} media).`);
+  } else if (defenseIndex < 0.9) {
+    reasons.push(`Rival sólido defensivamente en liga (${rivalAvgGA.toFixed(1)} GC vs ${leagueAvgGoals.toFixed(1)} media).`);
+  }
+
+  // Señal ②
+  if (sampleGames >= RIVAL_STREAK_THRESHOLD) {
+    if (consecutiveWins >= RIVAL_STREAK_THRESHOLD) {
+      totalModifierGC *= RIVAL_WIN_STREAK_GC_BOOST;
+      reasons.push(`Rival en racha de ${consecutiveWins} victorias seguidas en liga.`);
+    } else if (consecutiveLosses >= RIVAL_STREAK_THRESHOLD) {
+      totalModifierGF *= RIVAL_LOSS_STREAK_GF_BOOST;
+      reasons.push(`Rival en racha de ${consecutiveLosses} derrotas seguidas en liga.`);
+    }
+  }
+
+  return { totalModifierGF, totalModifierGC };
 }

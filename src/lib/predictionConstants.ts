@@ -26,6 +26,21 @@ export const SYNERGY_WIN_RATE_THRESHOLD = 0.70;
 /** Partidos mínimos juntos para computar sinergia de dúo */
 export const SYNERGY_MIN_MATCHES = 3;
 
+/** Peso del índice relativo ataque/defensa del rival vs media de liga (paso 10) */
+export const RIVAL_LEAGUE_INDEX_WEIGHT = 0.15;
+
+/** Boost al modifier de GC cuando el rival lleva N victorias consecutivas en liga */
+export const RIVAL_WIN_STREAK_GC_BOOST = 1.05;
+
+/** Boost al modifier de GF cuando el rival lleva N derrotas consecutivas en liga */
+export const RIVAL_LOSS_STREAK_GF_BOOST = 1.05;
+
+/** Racha mínima consecutiva para activar el boost de forma en liga del rival */
+export const RIVAL_STREAK_THRESHOLD = 3;
+
+/** Fixtures completados mínimos del rival para activar el índice relativo de liga */
+export const MIN_RIVAL_FIXTURES_FOR_INDEX = 2;
+
 /** Bonus de goles a favor por cada sinergia letal encontrada */
 export const SYNERGY_GF_BONUS = 0.05;
 
@@ -46,6 +61,17 @@ export const OPPONENT_STRENGTH_WEIGHT_CLAMP = { MIN: 0.78, MAX: 1.22 };
 
 /** Número de jugadores mínimos para activar la predicción */
 export const MIN_PLAYERS_FOR_PREDICTION = 5;
+
+// ─── Proyección Final de Clasificación ───────────────────────────────────────
+
+/** Partidos jugados necesarios para alcanzar peso=1 (plena confianza) en la regresión */
+export const PROJECTION_REGRESSION_GAMES = 8;
+
+/** Últimos N partidos de liga considerados como "forma reciente" en la proyección */
+export const PROJECTION_FORM_WINDOW = 5;
+
+/** Peso de la forma reciente sobre el PPM esperado combinado (0-1) */
+export const PROJECTION_FORM_WEIGHT = 0.25;
 
 /** Días de descanso considerados "fatiga" */
 export const FATIGUE_DAYS_THRESHOLD = 4;

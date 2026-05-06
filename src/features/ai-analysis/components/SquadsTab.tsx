@@ -7,7 +7,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Users, Shield, Calendar, ExternalLink, Plus } from 'lucide-react';
+import { Users, Shield, Calendar, ExternalLink, Plus, Info } from 'lucide-react';
 import { GRADE_COLORS } from '../../../lib/predictionConstants';
 import {
   LineChart,
@@ -92,7 +92,19 @@ export const SquadsTab = React.memo(function SquadsTab({
 
       {chartData.length >= 3 && (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-4">Evolución del Baremo por Jornada</p>
+          <div className="flex items-center gap-1.5 mb-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Evolución del Baremo por Jornada</p>
+            <Tooltip>
+              <TooltipTrigger render={<button type="button" className="inline-flex text-gray-300 hover:text-gray-400 focus:outline-none" />}>
+                <Info size={11} />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[260px] text-xs leading-snug p-3 space-y-1">
+                <p>Puntuación global de convocatoria (0–100) por jornada analizada, ordenadas cronológicamente.</p>
+                <p>La línea de referencia superior (A) indica el umbral de calidad alta (≥75). La zona media (50) separa convocatorias aceptables de las deficientes.</p>
+                <p className="text-gray-400">Solo se muestra con 3 o más jornadas analizadas.</p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
           <ResponsiveContainer width="100%" height={140}>
             <LineChart data={chartData} margin={{ top: 4, right: 16, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -126,9 +138,59 @@ export const SquadsTab = React.memo(function SquadsTab({
                 <th className="px-4 py-2">Jornada</th>
                 <th className="px-4 py-2">Rival</th>
                 <th className="px-4 py-2">Fecha</th>
-                <th className="px-4 py-2 text-center">Jugadores</th>
-                <th className="px-4 py-2 text-center">Grado</th>
-                <th className="px-4 py-2 text-center">Puntuación</th>
+                <th className="px-4 py-2 text-center">
+                  <div className="inline-flex items-center gap-1 justify-center">
+                    <span>Jugadores</span>
+                    <Tooltip>
+                      <TooltipTrigger render={<button type="button" className="inline-flex text-gray-300 hover:text-gray-400 focus:outline-none" />}>
+                        <Info size={10} />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[200px] text-xs p-2 leading-snug">
+                        Número de jugadores convocados (attendance = attending) para ese partido.
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </th>
+                <th className="px-4 py-2 text-center">
+                  <div className="inline-flex items-center gap-1 justify-center">
+                    <span>Grado</span>
+                    <Tooltip>
+                      <TooltipTrigger render={<button type="button" className="inline-flex text-gray-300 hover:text-gray-400 focus:outline-none" />}>
+                        <Info size={10} />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[240px] text-xs p-2.5 leading-snug space-y-1">
+                        <p>Nota cualitativa de la convocatoria:</p>
+                        <ul className="list-none space-y-0.5 text-[11px]">
+                          <li><strong>S</strong> — élite (≥90 pts)</li>
+                          <li><strong>A</strong> — alta calidad (75-89)</li>
+                          <li><strong>B</strong> — por encima de la media (60-74)</li>
+                          <li><strong>C</strong> — aceptable (45-59)</li>
+                          <li><strong>D</strong> — deficiente (&lt;45)</li>
+                        </ul>
+                        <p className="text-gray-400">Basado en baremo medio, equilibrio posicional, sinergias y ausencias de jugadores clave.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </th>
+                <th className="px-4 py-2 text-center">
+                  <div className="inline-flex items-center gap-1 justify-center">
+                    <span>Puntuación</span>
+                    <Tooltip>
+                      <TooltipTrigger render={<button type="button" className="inline-flex text-gray-300 hover:text-gray-400 focus:outline-none" />}>
+                        <Info size={10} />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[220px] text-xs p-2.5 leading-snug space-y-1">
+                        <p>Puntuación numérica 0–100 de la convocatoria.</p>
+                        <ul className="list-none space-y-0.5 text-[11px]">
+                          <li className="text-emerald-600">≥75 — alta calidad</li>
+                          <li className="text-amber-600">50–74 — media</li>
+                          <li className="text-red-500">&lt;50 — baja calidad</li>
+                        </ul>
+                        <p className="text-gray-400">Haciendo clic en una fila se abre el detalle de la convocatoria con mejoras sugeridas.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </th>
                 <th className="px-4 py-2 text-right">Acción</th>
               </tr>
             </thead>

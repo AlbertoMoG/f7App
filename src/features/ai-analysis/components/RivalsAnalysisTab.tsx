@@ -127,13 +127,15 @@ function AnalysisColumnsHeader({ headerTone, sortKey, sortDir, onSort }: Columns
     equipo:
       'Club analizado: puede ser un rival de la temporada o tu propio equipo en la segunda tabla.',
     factores:
-      'Argumentos calculados detrás del índice: H2H, forma del grupo vs la mediana de puntos/goles por partido, próximo duelo cuando aplica.',
+      'Argumentos del índice: H2H directo en liga, forma reciente vs media de temporada, índice ataque/defensa vs media de goles del grupo, racha consecutiva activa, PPG vs mediana del grupo y clasificación.',
     forma:
-      'Para rivales: tendencia reciente en partidos entre equipos del grupo. Para tu equipo: tendencia sobre tus últimos partidos de liga registrados.',
+      'Para rivales: tendencia de goles recientes vs su propia media de temporada en fixtures del grupo. Para tu equipo: tendencia sobre tus últimos partidos de liga registrados. Una flecha ↑ en Ataque indica que está marcando más que su media; ↓ en Encaje indica que está encajando más.',
     racha:
-      'Últimos resultados de liga, del más reciente al más antiguo en la ventana usada.',
+      'Balance de resultados en liga (V/E/D) en la ventana reciente. Los indicadores de racha activa (V seguidas / D seguidas) se muestran si el equipo lleva 2 o más partidos consecutivos con el mismo resultado.',
+    tabla:
+      'Puntos y GF/GC en tabla de liga. Bajo el marcador: índice de ataque (Atk) y defensa (Def) del rival vs la media de goles del grupo completo. Un valor + indica que marca/encaja más que la media; – que marca/encaja menos.',
     proximo:
-      'Si hay encuentro programado pendiente contra ese rival en liga (o contra algún rival en tu caso en gestión).',
+      'Partido pendiente programado contra ese rival en liga.',
   };
 
   return (
@@ -157,10 +159,10 @@ function AnalysisColumnsHeader({ headerTone, sortKey, sortDir, onSort }: Columns
         <Hint className={cn('min-w-[9rem]', th)} tip={tips.forma}>
           <span>Forma</span>
         </Hint>
-        <Hint className={cn('min-w-[6rem]', th)} tip={tips.racha}>
+        <Hint className={cn('min-w-[7rem]', th)} tip={tips.racha}>
           <span>Racha</span>
         </Hint>
-        <Hint className={cn('min-w-[8rem]', th)} tip="Puntos y GF/GC en tabla" sortable="tablePts">
+        <Hint className={cn('min-w-[8rem]', th)} tip={tips.tabla} sortable="tablePts">
           <span>Tabla</span>
         </Hint>
         <Hint className={cn('text-center w-24', th)} tip={tips.proximo} alignCenter>
@@ -359,6 +361,16 @@ function ThreatTableRow({ row, stripeMuted }: { row: RivalThreatRow; stripeMuted
                   {streakParsed.restLabel}
                 </span>
               ) : null}
+              {((row.leagueIndexData?.consecutiveWins ?? 0) >= 2) && (
+                <span className="inline-flex items-center rounded-md bg-orange-100 text-orange-800 border border-orange-200 px-1.5 py-0.5 text-[10px] font-semibold mt-0.5">
+                  {row.leagueIndexData!.consecutiveWins}V seguidas
+                </span>
+              )}
+              {((row.leagueIndexData?.consecutiveLosses ?? 0) >= 2) && (
+                <span className="inline-flex items-center rounded-md bg-slate-100 text-slate-600 border border-slate-200 px-1.5 py-0.5 text-[10px] font-semibold mt-0.5">
+                  {row.leagueIndexData!.consecutiveLosses}D seguidas
+                </span>
+              )}
             </div>
           ) : (
             <span className="text-[11px] leading-snug text-foreground/90">{row.streakLine}</span>
@@ -377,6 +389,28 @@ function ThreatTableRow({ row, stripeMuted }: { row: RivalThreatRow; stripeMuted
             <span className="text-[11px] tabular-nums text-muted-foreground font-medium">
               {tableParsed.gf} GF · {tableParsed.ga} GC
             </span>
+            {row.leagueIndexData && (
+              <div className="mt-1.5 flex flex-col gap-0.5">
+                <span className={cn(
+                  'text-[10px] font-semibold tabular-nums',
+                  row.leagueIndexData.attackIndex > 1.1 ? 'text-red-600' :
+                  row.leagueIndexData.attackIndex < 0.9 ? 'text-emerald-600' : 'text-muted-foreground'
+                )}>
+                  Atk {row.leagueIndexData.attackIndex >= 1
+                    ? `+${((row.leagueIndexData.attackIndex - 1) * 100).toFixed(0)}`
+                    : `${((row.leagueIndexData.attackIndex - 1) * 100).toFixed(0)}`}% vs liga
+                </span>
+                <span className={cn(
+                  'text-[10px] font-semibold tabular-nums',
+                  row.leagueIndexData.defenseIndex > 1.1 ? 'text-amber-600' :
+                  row.leagueIndexData.defenseIndex < 0.9 ? 'text-red-600' : 'text-muted-foreground'
+                )}>
+                  Def {row.leagueIndexData.defenseIndex >= 1
+                    ? `+${((row.leagueIndexData.defenseIndex - 1) * 100).toFixed(0)}`
+                    : `${((row.leagueIndexData.defenseIndex - 1) * 100).toFixed(0)}`}% vs liga
+                </span>
+              </div>
+            )}
           </div>
         ) : row.tableLine ? (
           <span className="text-xs leading-snug text-muted-foreground">{row.tableLine}</span>
@@ -466,13 +500,10 @@ export function RivalsAnalysisTab({
                 />
                 <TooltipContent className="max-w-[340px] p-4 text-xs space-y-2 leading-relaxed">
                   <p>
-                    <strong>Rivales:</strong> puntos de riesgo para tu equipo (H2H, forma en grupo,
-                    clasificación grabada en Firestore, ritmo PPG próximo duelo cuando aplica).
+                    <strong>Rivales:</strong> índice de peligro 0–100 calculado con H2H directo, forma reciente en liga del grupo, índice ataque/defensa vs media de goles del grupo, racha consecutiva activa, clasificación en tabla y ritmo PPG vs mediana.
                   </p>
                   <p>
-                    <strong>Tu equipo:</strong> segunda tabla con la misma estructura: el segundo
-                    indicador valor es tu índice de ritmo (0–100) basado en resultados agregados, no peligro
-                    de rival.
+                    <strong>Tu equipo:</strong> misma cuadrícula con índice de ritmo competitivo (no peligro de rival). Las columnas de índice vs liga no aplican a tu equipo (sus datos vienen de «Mis Partidos», no de fixtures neutrales).
                   </p>
                 </TooltipContent>
               </Tooltip>

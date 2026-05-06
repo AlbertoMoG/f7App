@@ -39,6 +39,7 @@ import {
   standingsEntryHasManualAdjustment,
 } from '../lib/leagueStandingsAudit';
 import { resetManualStandingsDeltaForSeason } from '../lib/resetManualStandingsForSeason';
+import { computeProjectedStandings } from '../lib/standingsProjection';
 
 interface StandingsViewProps {
   team: Team | null;
@@ -51,10 +52,8 @@ interface StandingsViewProps {
   onOpenMatch?: (matchId: string) => void;
 }
 
-interface RowData {
-  opponentId: string;
-  name: string;
-  shieldUrl?: string;
+/** Delta manual guardado en Firestore (puede ser cero si no hay ajuste). */
+interface ManualDelta {
   played: number;
   won: number;
   drawn: number;
@@ -62,6 +61,24 @@ interface RowData {
   goalsFor: number;
   goalsAgainst: number;
   points: number;
+}
+
+const ZERO_DELTA: ManualDelta = { played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, points: 0 };
+
+interface RowData {
+  opponentId: string;
+  name: string;
+  shieldUrl?: string;
+  /** Valores puramente calculados de matches + leagueFixtures (para mostrar y ordenar). */
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  points: number;
+  /** Delta manual almacenado en Firestore (solo para edición y badge de ajuste). */
+  manualDelta: ManualDelta;
   isAuto: boolean;
   dbId?: string;
 }
@@ -225,13 +242,26 @@ export default function StandingsView({ team, opponents, matches, standings, glo
         opponentId: id,
         name,
         shieldUrl,
-        played: (entry?.played ?? 0) + auto.played,
-        won: (entry?.won ?? 0) + auto.won,
-        drawn: (entry?.drawn ?? 0) + auto.drawn,
-        lost: (entry?.lost ?? 0) + auto.lost,
-        goalsFor: (entry?.goalsFor ?? 0) + auto.goalsFor,
-        goalsAgainst: (entry?.goalsAgainst ?? 0) + auto.goalsAgainst,
-        points: (entry?.points ?? 0) + auto.points,
+        // Valores automáticos (matches + leagueFixtures) → base del orden y la vista
+        played: auto.played,
+        won: auto.won,
+        drawn: auto.drawn,
+        lost: auto.lost,
+        goalsFor: auto.goalsFor,
+        goalsAgainst: auto.goalsAgainst,
+        points: auto.points,
+        // Delta manual de Firestore → solo para edición y badge de ajuste
+        manualDelta: entry
+          ? {
+              played: entry.played ?? 0,
+              won: entry.won ?? 0,
+              drawn: entry.drawn ?? 0,
+              lost: entry.lost ?? 0,
+              goalsFor: entry.goalsFor ?? 0,
+              goalsAgainst: entry.goalsAgainst ?? 0,
+              points: entry.points ?? 0,
+            }
+          : ZERO_DELTA,
         isAuto: false,
         dbId: entry?.id,
       });
@@ -255,44 +285,10 @@ export default function StandingsView({ team, opponents, matches, standings, glo
     leagueFixtures,
   ]);
 
-  const predictedStandings = useMemo(() => {
-    const totalTeams = fullStandings.length;
-    if (totalTeams === 0) return [];
-
-    const totalLeagueMatches = (totalTeams - 1) * 2; // Asumimos ida y vuelta
-    const totalPlayedAll = fullStandings.reduce((acc, t) => acc + t.played, 0);
-    const globalPPM = totalPlayedAll > 0 ? (fullStandings.reduce((acc, t) => acc + t.points, 0) / totalPlayedAll) : 1.3;
-
-    return fullStandings.map(team => {
-      // Regresión a la media para equipos con pocos partidos
-      const weight = Math.min(1, team.played / 5);
-      const teamPPM = team.played > 0 ? team.points / team.played : globalPPM;
-      const expectedPPM = (teamPPM * weight) + (globalPPM * (1 - weight));
-
-      const gfpm = team.played > 0 ? team.goalsFor / team.played : 1.5;
-      const gcpm = team.played > 0 ? team.goalsAgainst / team.played : 1.5;
-      
-      const remMatches = Math.max(0, totalLeagueMatches - team.played);
-      
-      const projectedPoints = team.points + (expectedPPM * remMatches);
-      const projectedGF = team.goalsFor + (gfpm * remMatches);
-      const projectedGC = team.goalsAgainst + (gcpm * remMatches);
-      
-      return {
-        ...team,
-        projectedPoints: Math.round(projectedPoints),
-        projectedGF: Math.round(projectedGF),
-        projectedGC: Math.round(projectedGC),
-        projectedPlayed: totalLeagueMatches
-      };
-    }).sort((a, b) => {
-      if (b.projectedPoints !== a.projectedPoints) return b.projectedPoints - a.projectedPoints;
-      const aDiff = a.projectedGF - a.projectedGC;
-      const bDiff = b.projectedGF - b.projectedGC;
-      if (bDiff !== aDiff) return bDiff - aDiff;
-      return b.projectedGF - a.projectedGF;
-    });
-  }, [fullStandings]);
+  const predictedStandings = useMemo(
+    () => computeProjectedStandings(fullStandings, leagueFixtures, currentSeasonId ?? ''),
+    [fullStandings, leagueFixtures, currentSeasonId],
+  );
 
   const handleInputChange = (opponentId: string, field: keyof StandingsEntry, value: string) => {
     const numValue = parseInt(value) || 0;
@@ -588,7 +584,7 @@ export default function StandingsView({ team, opponents, matches, standings, glo
           </CardTitle>
           <CardDescription className="flex items-center gap-1.5">
             <Info className="h-3.5 w-3.5" />
-            Solo cuentan partidos terminados (estado finalizado y marcador completo), en tus partidos de liga y en la liga entre equipos. Puedes sumar ajustes manuales al guardar.
+            Ordenada automáticamente por resultados de <strong>Mis Partidos de liga</strong> y <strong>Liga entre equipos</strong>. Solo partidos finalizados con marcador completo. Usa «Actualizar Puntos» para añadir ajustes excepcionales.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -610,9 +606,21 @@ export default function StandingsView({ team, opponents, matches, standings, glo
             <TableBody>
               {fullStandings.map((row, index) => {
                 const isMyTeam = row.opponentId === 'my-team';
-                const currentData = isEditing && !row.isAuto 
-                  ? { ...row, ...editedStandings[row.opponentId] } 
+                // En modo edición los inputs muestran el total real (auto + delta manual)
+                const combined = {
+                  ...row,
+                  played:       row.played       + row.manualDelta.played,
+                  won:          row.won           + row.manualDelta.won,
+                  drawn:        row.drawn         + row.manualDelta.drawn,
+                  lost:         row.lost          + row.manualDelta.lost,
+                  goalsFor:     row.goalsFor      + row.manualDelta.goalsFor,
+                  goalsAgainst: row.goalsAgainst  + row.manualDelta.goalsAgainst,
+                  points:       row.points        + row.manualDelta.points,
+                };
+                const currentData = isEditing && !row.isAuto
+                  ? { ...combined, ...editedStandings[row.opponentId] }
                   : row;
+                const hasManualAdj = row.manualDelta.points !== 0 || row.manualDelta.played !== 0;
 
                 return (
                   <TableRow key={row.opponentId} className={isMyTeam ? "bg-blue-50/50 hover:bg-blue-50 font-medium" : ""}>
@@ -644,70 +652,82 @@ export default function StandingsView({ team, opponents, matches, standings, glo
                           value={currentData.played}
                           onChange={(e) => handleInputChange(row.opponentId, 'played', e.target.value)}
                         />
-                      ) : row.played}
+                      ) : combined.played}
                     </TableCell>
                     <TableCell className="text-center">
                       {isEditing && !row.isAuto ? (
-                        <Input 
-                          type="number" 
-                          className="w-16 h-8 mx-auto text-center p-1" 
+                        <Input
+                          type="number"
+                          className="w-16 h-8 mx-auto text-center p-1"
                           value={currentData.won}
                           onChange={(e) => handleInputChange(row.opponentId, 'won', e.target.value)}
                         />
-                      ) : row.won}
+                      ) : combined.won}
                     </TableCell>
                     <TableCell className="text-center">
                       {isEditing && !row.isAuto ? (
-                        <Input 
-                          type="number" 
-                          className="w-16 h-8 mx-auto text-center p-1" 
+                        <Input
+                          type="number"
+                          className="w-16 h-8 mx-auto text-center p-1"
                           value={currentData.drawn}
                           onChange={(e) => handleInputChange(row.opponentId, 'drawn', e.target.value)}
                         />
-                      ) : row.drawn}
+                      ) : combined.drawn}
                     </TableCell>
                     <TableCell className="text-center">
                       {isEditing && !row.isAuto ? (
-                        <Input 
-                          type="number" 
-                          className="w-16 h-8 mx-auto text-center p-1" 
+                        <Input
+                          type="number"
+                          className="w-16 h-8 mx-auto text-center p-1"
                           value={currentData.lost}
                           onChange={(e) => handleInputChange(row.opponentId, 'lost', e.target.value)}
                         />
-                      ) : row.lost}
+                      ) : combined.lost}
                     </TableCell>
                     <TableCell className="text-center">
                       {isEditing && !row.isAuto ? (
-                        <Input 
-                          type="number" 
-                          className="w-16 h-8 mx-auto text-center p-1" 
+                        <Input
+                          type="number"
+                          className="w-16 h-8 mx-auto text-center p-1"
                           value={currentData.goalsFor}
                           onChange={(e) => handleInputChange(row.opponentId, 'goalsFor', e.target.value)}
                         />
-                      ) : row.goalsFor}
+                      ) : combined.goalsFor}
                     </TableCell>
                     <TableCell className="text-center">
                       {isEditing && !row.isAuto ? (
-                        <Input 
-                          type="number" 
-                          className="w-16 h-8 mx-auto text-center p-1" 
+                        <Input
+                          type="number"
+                          className="w-16 h-8 mx-auto text-center p-1"
                           value={currentData.goalsAgainst}
                           onChange={(e) => handleInputChange(row.opponentId, 'goalsAgainst', e.target.value)}
                         />
-                      ) : row.goalsAgainst}
+                      ) : combined.goalsAgainst}
                     </TableCell>
                     <TableCell className="text-center text-gray-500">
-                      {currentData.goalsFor - currentData.goalsAgainst}
+                      {combined.goalsFor - combined.goalsAgainst}
                     </TableCell>
                     <TableCell className="text-center font-bold text-gray-900 bg-gray-50/30">
                       {isEditing && !row.isAuto ? (
-                        <Input 
-                          type="number" 
-                          className="w-16 h-8 mx-auto text-center p-1 font-bold bg-white" 
+                        <Input
+                          type="number"
+                          className="w-16 h-8 mx-auto text-center p-1 font-bold bg-white"
                           value={currentData.points}
                           onChange={(e) => handleInputChange(row.opponentId, 'points', e.target.value)}
                         />
-                      ) : row.points}
+                      ) : (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span>{combined.points}</span>
+                          {hasManualAdj && (
+                            <span
+                              className="text-[9px] text-blue-500 font-normal leading-none"
+                              title={`Auto: ${row.points} pts · Ajuste manual: +${row.manualDelta.points} pts`}
+                            >
+                              ⊕ ajuste
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 );
@@ -725,14 +745,14 @@ export default function StandingsView({ team, opponents, matches, standings, glo
           </CardTitle>
           <CardDescription className="flex items-center gap-1.5 text-emerald-600/70">
             <TrendingUp className="h-3.5 w-3.5" />
-            Estimación de la clasificación final tras {(fullStandings.length - 1) * 2} jornadas.
+            Estimación de la clasificación final tras {(fullStandings.length - 1) * 2} jornadas. Incluye regresión a la media, forma reciente y nivel de confianza.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader className="bg-emerald-50/30">
               <TableRow>
-                <TableHead className="w-12 text-center text-emerald-700 font-semibold">Pos</TableHead>
+                <TableHead className="w-16 text-center text-emerald-700 font-semibold">Pos</TableHead>
                 <TableHead className="text-emerald-700 font-semibold">Equipo</TableHead>
                 <TableHead className="text-center text-emerald-700/70">PJ Est.</TableHead>
                 <TableHead className="text-center text-emerald-700/70">GF Est.</TableHead>
@@ -742,13 +762,27 @@ export default function StandingsView({ team, opponents, matches, standings, glo
               </TableRow>
             </TableHeader>
             <TableBody>
-              {predictedStandings.map((row, index) => {
+              {predictedStandings.map((row) => {
                 const isMyTeam = row.opponentId === 'my-team';
+                const confidenceClasses: Record<string, string> = {
+                  alta:  'bg-emerald-100 text-emerald-700 border-emerald-200',
+                  media: 'bg-amber-100 text-amber-700 border-amber-200',
+                  baja:  'bg-gray-100 text-gray-500 border-gray-200',
+                };
 
                 return (
                   <TableRow key={row.opponentId} className={isMyTeam ? "bg-emerald-100/30 hover:bg-emerald-100/50 font-medium" : "hover:bg-emerald-50/30"}>
-                    <TableCell className="text-center font-bold text-emerald-600/60">
-                      {index + 1}
+                    {/* Posición proyectada + indicador de cambio */}
+                    <TableCell className="text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <span className="font-bold text-emerald-600/60">{row.projectedRank}</span>
+                        {row.rankChange > 0 && (
+                          <span className="text-[10px] font-semibold text-emerald-600">↑{row.rankChange}</span>
+                        )}
+                        {row.rankChange < 0 && (
+                          <span className="text-[10px] font-semibold text-red-500">↓{Math.abs(row.rankChange)}</span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-3">
@@ -779,8 +813,17 @@ export default function StandingsView({ team, opponents, matches, standings, glo
                     <TableCell className="text-center text-emerald-700/60 font-medium">
                       {row.projectedGF - row.projectedGC}
                     </TableCell>
-                    <TableCell className="text-center font-black text-emerald-700 bg-white/50">
-                      {row.projectedPoints}
+                    {/* Puntos proyectados + badge de confianza */}
+                    <TableCell className="text-center bg-white/50">
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className="font-black text-emerald-700">{row.projectedPoints}</span>
+                        <Badge
+                          variant="outline"
+                          className={cn('text-[9px] px-1 py-0 h-4 leading-none capitalize', confidenceClasses[row.confidence])}
+                        >
+                          {row.confidence}
+                        </Badge>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
-import { Shield, Calendar, MapPin, Target, TrendingUp, Sparkles, Navigation, Clock, ExternalLink, Brain } from 'lucide-react';
+import { Shield, Calendar, MapPin, Target, TrendingUp, Sparkles, Navigation, Clock, ExternalLink, Brain, Info } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -92,16 +92,23 @@ export const PredictionCard = React.memo(function PredictionCard({
                 </Badge>
                 {match.isHome && <Badge className="bg-emerald-500 text-white text-[9px] h-5 border-none font-black uppercase">Casa</Badge>}
             </div>
-            <div className="flex items-center gap-1.5">
+            <Tooltip>
+              <TooltipTrigger render={<div className="flex items-center gap-1.5 cursor-help" />}>
                 <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Confianza</span>
                 <Badge className={cn(
                     "text-[10px] font-black border-none h-5 px-2",
-                    prediction.confidence === 'Alta' ? "bg-emerald-100 text-emerald-700" : 
+                    prediction.confidence === 'Alta' ? "bg-emerald-100 text-emerald-700" :
                     prediction.confidence === 'Media' ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
                 )}>
                     {prediction.confidence}
                 </Badge>
-            </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-[260px] text-xs leading-snug p-3 space-y-1.5">
+                <p><strong>Alta</strong> — más de 2 enfrentamientos previos H2H. La IA ajusta el peso del historial directo hasta un 60%.</p>
+                <p><strong>Media</strong> — 1–2 partidos H2H previos. Mezcla entre histórico y media global de goles.</p>
+                <p><strong>Baja</strong> — sin historial H2H. Predicción basada exclusivamente en promedios, baremo de plantilla y forma de liga.</p>
+              </TooltipContent>
+            </Tooltip>
         </div>
 
         <div className="p-5">
@@ -142,7 +149,17 @@ export const PredictionCard = React.memo(function PredictionCard({
             <div className="space-y-3 mb-6 bg-gray-50/50 p-4 rounded-2xl border border-gray-100">
                 <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-gray-500 mb-1">
                     <span>V / E / D</span>
-                    <span>Probabilidad</span>
+                    <div className="flex items-center gap-1">
+                      <span>Probabilidad</span>
+                      <Tooltip>
+                        <TooltipTrigger render={<button type="button" className="inline-flex text-gray-300 hover:text-gray-400 focus:outline-none" />}>
+                          <Info size={10} />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[230px] text-xs leading-snug p-2.5">
+                          Calculadas con distribución de Poisson independiente sobre los goles predichos (GF y GC). Normalizadas para sumar el 100%.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
                 </div>
                 <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden flex shadow-inner">
                     <div className="h-full bg-emerald-500 transition-all" style={{ width: `${prediction.probabilities.win}%` }} />
@@ -161,6 +178,27 @@ export const PredictionCard = React.memo(function PredictionCard({
                 <div className="flex items-center gap-1.5 mb-2 px-1">
                     <Target size={12} className="text-indigo-500" />
                     <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Factores Determinantes</span>
+                    <Tooltip>
+                      <TooltipTrigger render={<button type="button" className="inline-flex text-gray-300 hover:text-gray-400 focus:outline-none" />}>
+                        <Info size={11} />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[280px] text-xs leading-snug p-3 space-y-1">
+                        <p className="font-semibold">El modelo aplica 10 señales en secuencia:</p>
+                        <ol className="list-decimal pl-4 space-y-0.5 text-[11px]">
+                          <li>Historial H2H ponderado dinámicamente</li>
+                          <li>Fortaleza de plantilla vs media del equipo</li>
+                          <li>Balance táctico (portero, defensas, delanteros)</li>
+                          <li>Sinergias letales entre jugadores</li>
+                          <li>Jugadores clave ausentes</li>
+                          <li>Diferencial en clasificación</li>
+                          <li>Franja de edad media</li>
+                          <li>Inercia (últimos 3 partidos)</li>
+                          <li>Forma reciente del rival en liga del grupo</li>
+                          <li>Índice ataque/defensa del rival vs media de liga + racha</li>
+                        </ol>
+                        <p className="text-[10px] text-gray-400 mt-1">Resultado final corregido con calibración automática sobre los últimos 5 partidos completados.</p>
+                      </TooltipContent>
+                    </Tooltip>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                     {prediction.reasons.map((reason, i) => (
@@ -201,10 +239,11 @@ export const PredictionCard = React.memo(function PredictionCard({
             <div className="flex gap-2">
                 <Button 
                     onClick={() => onOpenRecommended(match.id)}
+                    title="Convocatoria táctica (10), formación y rival según el modelo"
                     className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl h-11 font-black text-xs uppercase tracking-wider gap-2 shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
                 >
                     <Sparkles size={16} />
-                    <span>Mejor Equipo</span>
+                    <span>Mejor convocatoria</span>
                 </Button>
                 {onNavigateToMatch && (
                     <Button 

@@ -1,11 +1,12 @@
 import type { LeagueFixture, Match, Opponent, StandingsEntry, Team } from '../types';
 import type { LeagueStandingStats } from './leagueStandingsAggregate';
-import { getOpponentLeagueForm } from './opponentForm';
+import { getOpponentLeagueForm, getRivalLeagueIndexData, type RivalLeagueIndexData } from './opponentForm';
 import { getPpgForStrength, medianGroupPpg } from './opponentStrength';
 import { compareLeagueFixturesRecentFirst } from './leagueFixtureOrder';
 import {
   OPPONENT_FORM_TREND_CLAMP,
   OPPONENT_LEAGUE_FORM_WINDOW,
+  RIVAL_STREAK_THRESHOLD,
 } from './predictionConstants';
 
 export type RivalThreatLevel = 'Alto' | 'Medio' | 'Bajo';
@@ -36,6 +37,8 @@ export interface RivalThreatRow {
   hasUpcoming: boolean;
   /** `managed` = tu equipo gestionado; mismo esquema de columnas, score = ritmo competitivo. */
   rowKind?: 'rival' | 'managed';
+  /** Índice ataque/defensa vs media de liga + racha consecutiva (null si no hay datos suficientes) */
+  leagueIndexData: RivalLeagueIndexData | null;
 }
 
 function medianPointsStandalone(values: number[]): number | null {
@@ -415,6 +418,33 @@ export function computeRivalThreatRows(
       reasons.push('Tenéis partido pendiente contra ellos.');
     }
 
+    // Índice de liga: ataque/defensa relativo + racha consecutiva
+    const leagueIndex = getRivalLeagueIndexData(opponentId, seasonId, leagueFixtures);
+    if (leagueIndex) {
+      const { attackIndex, defenseIndex, consecutiveWins, consecutiveLosses } = leagueIndex;
+      // attackIndex > 1 → rival mete más que la media → más peligroso
+      score += clamp((attackIndex - 1) * 12, -8, 10);
+      // defenseIndex < 1 → rival encaja menos → más peligroso defensivamente
+      score += clamp((1 - defenseIndex) * 8, -6, 8);
+      if (attackIndex > 1.1) {
+        reasons.push(`Promedio goleador superior a la media de liga (${leagueIndex.rivalAvgGF.toFixed(1)} vs ${leagueIndex.leagueAvgGoals.toFixed(1)}).`);
+      } else if (attackIndex < 0.9) {
+        reasons.push(`Bajo promedio goleador en liga (${leagueIndex.rivalAvgGF.toFixed(1)} vs ${leagueIndex.leagueAvgGoals.toFixed(1)}).`);
+      }
+      if (defenseIndex < 0.9) {
+        reasons.push(`Encaja menos que la media en liga (defensa sólida).`);
+      } else if (defenseIndex > 1.1) {
+        reasons.push(`Encaja más que la media en liga (defensiva vulnerable).`);
+      }
+      if (consecutiveWins >= RIVAL_STREAK_THRESHOLD) {
+        score += 5;
+        reasons.push(`En racha de ${consecutiveWins} victorias consecutivas.`);
+      } else if (consecutiveLosses >= RIVAL_STREAK_THRESHOLD) {
+        score -= 5;
+        reasons.push(`En racha de ${consecutiveLosses} derrotas consecutivas (momento bajo).`);
+      }
+    }
+
     score = Math.round(clamp(score, 0, 100));
     const level = levelFromScore(score);
 
@@ -469,6 +499,7 @@ export function computeRivalThreatRows(
       tableData,
       ppgData,
       hasUpcoming,
+      leagueIndexData: leagueIndex ?? null,
     });
   }
 
@@ -612,6 +643,7 @@ export function computeMyTeamThreatRow(
     tableData,
     ppgData,
     hasUpcoming,
+    leagueIndexData: null,
     rowKind: 'managed',
   };
 }

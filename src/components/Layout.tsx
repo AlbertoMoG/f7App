@@ -39,7 +39,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, team, 
 
   const navItems = [
     { id: 'dashboard', label: 'Resumen', icon: LayoutDashboard },
-    { id: 'ai-analysis', label: 'Análisis IA', icon: Brain },
+    { id: 'inteligencia-ia', label: 'Inteligencia IA', icon: Brain },
     { id: 'standings', label: 'Clasificación', icon: Trophy },
     { id: 'players', label: 'Jugadores', icon: Users },
     { id: 'matches', label: 'Partidos', icon: Calendar },

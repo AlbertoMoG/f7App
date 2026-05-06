@@ -28,7 +28,8 @@ import {
   ClipboardCheck,
   Bandage,
   Trophy,
-  Download
+  Download,
+  Brain
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -72,7 +73,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Player, Position, PlayerStat, Season, Match, PlayerSeason, Injury, Opponent } from '../types';
+import { Player, Position, PlayerStat, Season, Match, PlayerSeason, Injury, Opponent, Field, StandingsEntry, LeagueFixture } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { uploadImage } from '../lib/imageUpload';
@@ -109,6 +110,8 @@ import {
 import InjuredPlayers from './InjuredPlayers';
 import AttendanceTracker from './AttendanceTracker';
 import PlayerCumulativeAttendanceChart from './PlayerCumulativeAttendanceChart';
+import { useNavigation } from '../context/NavigationContext';
+import { PlayerBaremoInsightsTab } from '../features/ai-analysis/components/PlayerBaremoInsightsTab';
 
 interface PlayerListProps {
   players: Player[];
@@ -118,6 +121,9 @@ interface PlayerListProps {
   seasons: Season[];
   injuries: Injury[];
   opponents: Opponent[];
+  standings: StandingsEntry[];
+  fields: Field[];
+  leagueFixtures?: LeagueFixture[];
   globalSeasonId: string;
   onAddPlayer: (player: Omit<Player, 'id' | 'teamId'>) => void;
   onUpdatePlayer: (player: Player, seasonIds: string[]) => void;
@@ -174,9 +180,10 @@ const BAREMO_CONFIG = {
  * Componente para mostrar y gestionar la lista de jugadores.
  * Permite añadir, editar y eliminar jugadores, así como ver sus estadísticas.
  */
-export default function PlayerList({ players, playerSeasons, stats, matches, seasons, injuries, opponents, globalSeasonId, onAddPlayer, onUpdatePlayer, onDeletePlayer, onAddInjury, onUpdateInjury, onUpdateAttendance }: PlayerListProps) {
+export default function PlayerList({ players, playerSeasons, stats, matches, seasons, injuries, opponents, standings, fields, leagueFixtures = [], globalSeasonId, onAddPlayer, onUpdatePlayer, onDeletePlayer, onAddInjury, onUpdateInjury, onUpdateAttendance }: PlayerListProps) {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = React.useState<'plantilla' | 'asistencia' | 'lesionados' | 'pichichi'>('plantilla');
+  const { setActiveTab: setShellTab } = useNavigation();
+  const [activeTab, setActiveTab] = React.useState<'plantilla' | 'valoracion-ia' | 'asistencia' | 'lesionados' | 'pichichi'>('plantilla');
   const [viewMode, setViewMode] = React.useState<'grid' | 'table'>('table');
   const [searchTerm, setSearchTerm] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<'active' | 'inactive' | 'all'>('active');
@@ -1245,6 +1252,13 @@ React.useEffect(() => {
           Plantilla
         </button>
         <button 
+          onClick={() => setActiveTab('valoracion-ia')}
+          className={cn("flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-all", activeTab === 'valoracion-ia' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-500 hover:text-gray-700")}
+        >
+          <Brain size={16} />
+          Valoración IA
+        </button>
+        <button 
           onClick={() => setActiveTab('asistencia')}
           className={cn("flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-all", activeTab === 'asistencia' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-500 hover:text-gray-700")}
         >
@@ -1414,6 +1428,22 @@ React.useEffect(() => {
             )}
           </div>
         </motion.div>
+      ) : activeTab === 'valoracion-ia' ? (
+        <PlayerBaremoInsightsTab
+          plantillaPlayers={filteredPlayers}
+          teamPlayers={players}
+          playerSeasons={playerSeasons}
+          matches={matches}
+          stats={stats}
+          seasons={seasons}
+          injuries={injuries}
+          opponents={opponents}
+          standings={standings}
+          fields={fields}
+          leagueFixtures={leagueFixtures}
+          globalSeasonId={globalSeasonId}
+          onOpenInteligencia={() => setShellTab('inteligencia-ia')}
+        />
       ) : activeTab === 'plantilla' ? (
         <>
           <div className="flex flex-col sm:flex-row gap-4 mb-6 flex-wrap">

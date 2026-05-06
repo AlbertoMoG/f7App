@@ -4,7 +4,8 @@ import {
   Brain,
   Info,
   History,
-  Swords
+  Swords,
+  LayoutGrid,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -27,7 +28,9 @@ import { AIVsFootballTab } from '../features/ai-analysis/components/AIVsFootball
 import { RivalsAnalysisTab } from '../features/ai-analysis/components/RivalsAnalysisTab';
 import { useRivalThreatAnalysis } from '../features/ai-analysis/hooks/useRivalThreatAnalysis';
 import { RecommendedSquadModal } from '../features/ai-analysis/components/RecommendedSquadModal';
+import { IdealSquadTab } from '../features/ai-analysis/components/IdealSquadTab';
 import { SquadDetailModal } from '../features/ai-analysis/components/SquadDetailModal';
+import { buildSynergyMap } from '../lib/synergyCalculator';
 
 interface AIAnalysisProps {
   team: Team | null;
@@ -47,14 +50,19 @@ interface AIAnalysisProps {
 
 export default function AIAnalysis(props: AIAnalysisProps) {
   const [activeAITab, setActiveAITab] = React.useState<
-    'predictions' | 'squads' | 'rivals' | 'history'
+    'predictions' | 'squads' | 'idealSquad' | 'rivals' | 'history'
   >('predictions');
   const [recommendedMatchId, setRecommendedMatchId] = React.useState<string | null>(null);
   const [selectedSquadMatchId, setSelectedSquadMatchId] = React.useState<string | null>(null);
 
   // Custom Hooks
-  const { filteredPlayers, allPlayerRatings } = usePlayerRatings(props);
-  
+  const { allPlayerRatings } = usePlayerRatings(props);
+
+  const synergyMap = React.useMemo(
+    () => buildSynergyMap(props.matches, props.stats),
+    [props.matches, props.stats]
+  );
+
   const predictions = usePredictions({ 
     ...props, 
     allPlayerRatings,
@@ -93,6 +101,18 @@ export default function AIAnalysis(props: AIAnalysisProps) {
         return m.status === 'scheduled' && isAtSeason;
     }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [props.matches, props.globalSeasonId]);
+
+  const idealSquadFallbackLambdas = React.useMemo(() => {
+    const completed = props.matches.filter(
+      (m) => m.status === 'completed' && m.scoreTeam != null && m.scoreOpponent != null
+    );
+    const leagueMs = completed.filter((m) => m.type === 'league');
+    const base = leagueMs.length > 0 ? leagueMs : completed;
+    if (base.length === 0) return { gf: 1.5, gc: 1.5 };
+    const gf = base.reduce((a, m) => a + (m.scoreTeam ?? 0), 0) / base.length;
+    const gc = base.reduce((a, m) => a + (m.scoreOpponent ?? 0), 0) / base.length;
+    return { gf: Math.max(0.1, gf), gc: Math.max(0.1, gc) };
+  }, [props.matches]);
 
   const analyzedMatches = React.useMemo(() => {
     return props.matches
@@ -182,6 +202,16 @@ export default function AIAnalysis(props: AIAnalysisProps) {
                 Estudio de Convocatorias
             </div>
             <div 
+                onClick={() => setActiveAITab('idealSquad')}
+                className={cn(
+                    "flex items-center gap-2 px-6 py-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-wider cursor-pointer select-none",
+                    activeAITab === 'idealSquad' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-400 hover:text-gray-500"
+                )}
+            >
+                <LayoutGrid size={14} />
+                Convocatoria ideal IA
+            </div>
+            <div 
                 onClick={() => setActiveAITab('rivals')}
                 className={cn(
                     "flex items-center gap-2 px-6 py-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-wider cursor-pointer select-none",
@@ -223,13 +253,6 @@ export default function AIAnalysis(props: AIAnalysisProps) {
               />
             )})}
           </div>
-        ) : activeAITab === 'rivals' ? (
-          <RivalsAnalysisTab
-            rows={rivalThreatAnalysis.rows}
-            managedTeamRow={rivalThreatAnalysis.managedTeamRow}
-            seasonLabel={rivalSeasonLabel}
-            isAllSeasonsNote={props.globalSeasonId === 'all'}
-          />
         ) : activeAITab === 'squads' ? (
           <Card className="border-none shadow-sm rounded-2xl overflow-hidden">
             <CardHeader className="pb-4">
@@ -305,6 +328,24 @@ export default function AIAnalysis(props: AIAnalysisProps) {
               />
             </CardContent>
           </Card>
+        ) : activeAITab === 'idealSquad' ? (
+          <IdealSquadTab
+            scheduledMatches={scheduledMatches}
+            stats={props.stats}
+            opponents={props.opponents}
+            seasons={props.seasons}
+            fields={props.fields}
+            predictions={predictions}
+            onOpenDetail={setRecommendedMatchId}
+            onNavigateToMatch={props.onNavigateToMatch}
+          />
+        ) : activeAITab === 'rivals' ? (
+          <RivalsAnalysisTab
+            rows={rivalThreatAnalysis.rows}
+            managedTeamRow={rivalThreatAnalysis.managedTeamRow}
+            seasonLabel={rivalSeasonLabel}
+            isAllSeasonsNote={props.globalSeasonId === 'all'}
+          />
         ) : (
           <AIVsFootballTab 
             matches={props.matches}
@@ -322,6 +363,13 @@ export default function AIAnalysis(props: AIAnalysisProps) {
           predictions={predictions}
           teamShieldUrl={props.team?.shieldUrl}
           teamName={props.team?.name}
+          players={props.players}
+          playerSeasons={props.playerSeasons}
+          stats={props.stats}
+          injuries={props.injuries}
+          allPlayerRatings={allPlayerRatings}
+          synergyMap={synergyMap}
+          fallbackModelLambdas={idealSquadFallbackLambdas}
         />
 
         <SquadDetailModal

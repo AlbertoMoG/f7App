@@ -14,14 +14,14 @@ import {
   FATIGUE_DAYS_THRESHOLD,
   REST_DAYS_THRESHOLD,
   AGE_MODIFIERS,
-  posOrder
 } from '../../../lib/predictionConstants';
 import { calculateAge } from '../../../lib/ageUtils';
 import { getStandingsStats } from '../../../lib/standingsUtils';
 import { poisson, getMostProbableScore } from '../../../lib/poisson.ts';
 import { buildSynergyMap, getSynergyKey } from '../../../lib/synergyCalculator';
 import { MatchPrediction, PlayerRating } from '../../../types/aiAnalysis';
-import { applyLeagueFormToPredictionModifiers } from '../../../lib/opponentForm';
+import { applyLeagueFormToPredictionModifiers, applyRivalLeagueIndexToModifiers } from '../../../lib/opponentForm';
+import { buildOptimalRecommendedSquadAutoOutfield } from '../../../lib/optimalRecommendedSquad';
 
 interface UsePredictionsProps {
   players: Player[];
@@ -227,6 +227,18 @@ export function usePredictions({
       totalModifierGF = leagueAdj.totalModifierGF;
       totalModifierGC = leagueAdj.totalModifierGC;
 
+      // 10. Índice ataque/defensa relativo vs media de liga + racha reciente de fixtures
+      const leagueIndexAdj = applyRivalLeagueIndexToModifiers(
+        match.opponentId,
+        match.seasonId,
+        leagueFixtures,
+        totalModifierGF,
+        totalModifierGC,
+        reasons,
+      );
+      totalModifierGF = leagueIndexAdj.totalModifierGF;
+      totalModifierGC = leagueIndexAdj.totalModifierGC;
+
       // ─── CLAMP GLOBAL DE MODIFICADORES ───────────────────────────────────────
       const CLAMP_MAX = 2.0;
       const CLAMP_MIN = 0.35;
@@ -268,23 +280,24 @@ export function usePredictions({
           lossProb = (lossProb / totalProb) * 100;
       }
 
-      // Mejor equipo posible con restricciones posicionales (1 GK + 2 DEF mínimo)
-      const sortedEligible = players.filter(p =>
-        playerSeasons.some(ps => ps.playerId === p.id && ps.seasonId === match.seasonId) &&
-        !injuries.some(inj => inj.playerId === p.id && !inj.endDate)
-      ).sort((a, b) => {
-        const ra = allPlayerRatings.find(r => r.id === a.id)?.rating || 0;
-        const rb = allPlayerRatings.find(r => r.id === b.id)?.rating || 0;
-        return rb - ra;
+      // Convocatoria ideal: formación 2-3-1, 10–12 jugadores de campo (elige el baremo medio más alto) + portero
+      const {
+        squad: recommendedSquad,
+        outfieldSlots: recommendedOutfieldSlots,
+      } = buildOptimalRecommendedSquadAutoOutfield({
+        players,
+        playerSeasons,
+        seasonId: match.seasonId,
+        matchId: match.id,
+        stats,
+        injuries,
+        allPlayerRatings,
+        teamAvgBaremo,
+        synergyMap,
+        formation: '2-3-1',
+        predGF: finalPredGF,
+        predGC: finalPredGC,
       });
-      const squadSet = new Set<string>();
-      const topGk = sortedEligible.find(p => p.position === 'Portero');
-      if (topGk) squadSet.add(topGk.id);
-      sortedEligible.filter(p => p.position === 'Defensa').slice(0, 2).forEach(p => squadSet.add(p.id));
-      sortedEligible.forEach(p => { if (squadSet.size < 10) squadSet.add(p.id); });
-      const recommendedSquad = sortedEligible
-        .filter(p => squadSet.has(p.id))
-        .sort((a, b) => (posOrder[a.position] || 9) - (posOrder[b.position] || 9));
 
       const recSquadAvgBaremo = recommendedSquad.length > 0 
         ? recommendedSquad.reduce((acc, p) => acc + (allPlayerRatings.find(pr => pr.id === p.id)?.rating || teamAvgBaremo), 0) / recommendedSquad.length 
@@ -317,7 +330,10 @@ export function usePredictions({
         reasons,
         probabilities: { win: winProb, draw: drawProb, loss: lossProb },
         recommendedSquad,
-        recommendedProbabilities: { win: recWinProb, draw: recDrawProb, loss: recLossProb } 
+        recommendedProbabilities: { win: recWinProb, draw: recDrawProb, loss: recLossProb },
+        modelPredGF: finalPredGF,
+        modelPredGC: finalPredGC,
+        recommendedOutfieldSlots,
       });
     });
 
