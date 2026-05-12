@@ -26,11 +26,12 @@ import {
   TooltipTrigger, 
   TooltipContent, 
 } from '@/components/ui/tooltip';
-import { Player, Lineup, LineupSlot, Match, PlayerStat, Season, PlayerSeason, Injury } from '../types';
+import { Player, Lineup, LineupSlot, Match, PlayerStat, Season, PlayerSeason, Injury, Opponent } from '../types';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { toPng } from 'html-to-image';
+import { formatMatchOptionLabel } from '@/lib/matchDisplayLabel';
 
 interface LineupSimulatorProps {
   players: Player[];
@@ -39,6 +40,7 @@ interface LineupSimulatorProps {
   matches: Match[];
   stats: PlayerStat[];
   seasons: Season[];
+  opponents: Opponent[];
   injuries: Injury[];
   globalSeasonId: string;
   initialMatchId?: string | null;
@@ -92,7 +94,8 @@ export default function LineupSimulator({
   lineups, 
   matches, 
   stats, 
-  seasons, 
+  seasons,
+  opponents,
   injuries,
   globalSeasonId,
   initialMatchId,
@@ -105,17 +108,31 @@ export default function LineupSimulator({
   const [draggedPlayerId, setDraggedPlayerId] = React.useState<string | null>(null);
   const [lineupName, setLineupName] = React.useState('');
   const [isSaveDialogOpen, setIsSaveDialogOpen] = React.useState(false);
-  const [selectedSeasonId, setSelectedSeasonId] = React.useState<string>(globalSeasonId === 'all' ? '' : globalSeasonId);
   const [selectedMatchId, setSelectedMatchId] = React.useState<string>('');
+  /** When global season is "all", user picks which season scopes matches / roster. */
+  const [localSeasonForAll, setLocalSeasonForAll] = React.useState<string>('');
 
-  // Sincronizar selectedSeasonId con globalSeasonId si este cambia
+  const latestSeasonId = React.useMemo(() => {
+    if (seasons.length === 0) return '';
+    return [...seasons].sort((a, b) => b.startYear - a.startYear)[0]!.id;
+  }, [seasons]);
+
+  const effectiveSeasonId = React.useMemo(() => {
+    if (globalSeasonId !== 'all') return globalSeasonId;
+    return localSeasonForAll || latestSeasonId;
+  }, [globalSeasonId, localSeasonForAll, latestSeasonId]);
+
   React.useEffect(() => {
-    if (globalSeasonId !== 'all') {
-      setSelectedSeasonId(globalSeasonId);
-    } else {
-      setSelectedSeasonId('');
+    if (globalSeasonId === 'all' && latestSeasonId && !localSeasonForAll) {
+      setLocalSeasonForAll(latestSeasonId);
     }
-  }, [globalSeasonId]);
+  }, [globalSeasonId, latestSeasonId, localSeasonForAll]);
+
+  React.useEffect(() => {
+    if (!selectedMatchId || !effectiveSeasonId) return;
+    const m = matches.find((x) => x.id === selectedMatchId);
+    if (!m || m.seasonId !== effectiveSeasonId) setSelectedMatchId('');
+  }, [effectiveSeasonId, selectedMatchId, matches]);
   const [isExporting, setIsExporting] = React.useState(false);
   const lineupRef = React.useRef<HTMLDivElement>(null);
 
@@ -126,7 +143,9 @@ export default function LineupSimulator({
     if (initialMatchId) {
       const match = matches.find(m => m.id === initialMatchId);
       if (match) {
-        setSelectedSeasonId(match.seasonId);
+        if (globalSeasonId === 'all') {
+          setLocalSeasonForAll(match.seasonId);
+        }
         setSelectedMatchId(initialMatchId);
         
         const associatedLineup = lineups.find(l => l.matchId === initialMatchId);
@@ -142,10 +161,10 @@ export default function LineupSimulator({
       // Clear the initial ID so it doesn't re-trigger on every render
       onClearInitialMatchId?.();
     }
-  }, [initialMatchId, lineups, matches, onClearInitialMatchId]);
+  }, [initialMatchId, lineups, matches, onClearInitialMatchId, globalSeasonId]);
 
   const filteredMatches = matches
-    .filter(m => !selectedSeasonId || m.seasonId === selectedSeasonId)
+    .filter((m) => !!effectiveSeasonId && m.seasonId === effectiveSeasonId)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const selectedMatch = matches.find(m => m.id === selectedMatchId);
@@ -153,9 +172,9 @@ export default function LineupSimulator({
   // Players that belong to the selected season
   const seasonPlayers = React.useMemo(() => {
     let filtered = players;
-    if (selectedSeasonId) {
+    if (effectiveSeasonId) {
       const seasonPlayerIds = playerSeasons
-        .filter(ps => ps.seasonId === selectedSeasonId)
+        .filter(ps => ps.seasonId === effectiveSeasonId)
         .map(ps => ps.playerId);
       filtered = players.filter(p => seasonPlayerIds.includes(p.id));
     }
@@ -164,7 +183,7 @@ export default function LineupSimulator({
       const activeInjury = injuries.some(i => i.playerId === p.id && !i.endDate);
       return p.isActive !== false && !activeInjury;
     });
-  }, [players, playerSeasons, selectedSeasonId, injuries]);
+  }, [players, playerSeasons, effectiveSeasonId, injuries]);
 
   // Eligible players: are in the season AND (if match selected) are attending
   const eligiblePlayers = seasonPlayers.filter(p => {
@@ -257,7 +276,7 @@ export default function LineupSimulator({
 
   const onInitialSaveClick = () => {
     if (!lineupName) return;
-    if (selectedSeasonId && selectedMatchId) {
+    if (effectiveSeasonId && selectedMatchId) {
       setIsMatchConfirmOpen(true);
     } else {
       handleSave(false);
@@ -268,7 +287,9 @@ export default function LineupSimulator({
     if (l.matchId) {
       const match = matches.find(m => m.id === l.matchId);
       if (match) {
-        setSelectedSeasonId(match.seasonId);
+        if (globalSeasonId === 'all') {
+          setLocalSeasonForAll(match.seasonId);
+        }
         setSelectedMatchId(l.matchId);
       }
     }
@@ -311,23 +332,39 @@ export default function LineupSimulator({
         
         <div className="flex flex-col gap-4 w-full lg:w-auto">
           <div className="flex flex-wrap items-center gap-4">
+            {globalSeasonId === 'all' && seasons.length > 0 && (
+              <div className="flex flex-col gap-1 min-w-[140px]">
+                <Label className="text-[10px] font-black text-gray-400 uppercase ml-1">Temporada</Label>
+                <select
+                  className="bg-white border border-gray-200 rounded-xl h-10 px-3 text-sm shadow-sm focus:ring-2 focus:ring-emerald-500 outline-none max-w-[220px]"
+                  value={localSeasonForAll || latestSeasonId}
+                  onChange={(e) => setLocalSeasonForAll(e.target.value)}
+                >
+                  {[...seasons]
+                    .sort((a, b) => b.startYear - a.startYear)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                        {s.division ? ` · ${s.division}` : ''}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-3">
-              <div className="flex flex-col gap-1 min-w-[160px]">
+              <div className="flex flex-col gap-1 min-w-[200px] sm:min-w-[280px] flex-1 max-w-full">
                 <Label className="text-[10px] font-black text-gray-400 uppercase ml-1">Partido</Label>
                 <select 
-                  className="bg-white border border-gray-200 rounded-xl h-10 px-3 text-sm shadow-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="bg-white border border-gray-200 rounded-xl h-10 px-3 text-sm shadow-sm focus:ring-2 focus:ring-emerald-500 outline-none w-full max-w-md"
                   value={selectedMatchId}
                   onChange={(e) => setSelectedMatchId(e.target.value)}
                 >
                   <option value="">Selecciona partido...</option>
-                  {filteredMatches.map(m => {
-                    const season = seasons.find(s => s.id === m.seasonId);
-                    return (
-                      <option key={m.id} value={m.id}>
-                        {format(new Date(m.date), 'dd/MM')} - {m.type === 'league' ? `Jornada ${m.round || '?'}` : m.type === 'cup' ? `Ronda ${m.round || '?'}` : 'Amistoso'} {season?.division ? `(${season.division})` : ''}
-                      </option>
-                    );
-                  })}
+                  {filteredMatches.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {formatMatchOptionLabel(m, seasons, opponents)}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -408,7 +445,8 @@ export default function LineupSimulator({
                 <DialogHeader>
                   <DialogTitle>¿Asociar al partido?</DialogTitle>
                   <DialogDescription>
-                    Has seleccionado un partido. ¿Quieres vincular esta alineación a la convocatoria de {selectedMatch ? format(new Date(selectedMatch.date), 'dd/MM') : ''}?
+                    Has seleccionado un partido. ¿Quieres vincular esta alineación a la convocatoria de{' '}
+                    {selectedMatch ? formatMatchOptionLabel(selectedMatch, seasons, opponents) : ''}?
                   </DialogDescription>
                 </DialogHeader>
                 <div className="py-4 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
@@ -632,7 +670,7 @@ export default function LineupSimulator({
           {/* Right Sidebar: Banquillo & Saved */}
           <div className="xl:col-span-3 space-y-6">
             {/* Banquillo section */}
-            <Card className="border-none shadow-sm rounded-3xl overflow-hidden sticky top-8">
+            <Card className="border-none shadow-sm rounded-3xl overflow-hidden">
               <CardHeader className="bg-emerald-50/50 border-b border-emerald-100 py-3 px-4">
                 <div className="flex items-center justify-between">
                   <div>
@@ -702,16 +740,12 @@ export default function LineupSimulator({
                           (() => {
                             const match = matches.find(m => m.id === l.matchId);
                             if (!match) return null;
-                            const season = seasons.find(s => s.id === match.seasonId);
                             return (
-                              <p className="text-[8px] text-emerald-600 font-bold flex flex-col gap-0.5">
-                                <span className="flex items-center gap-1">
-                                  <Calendar size={8} />
-                                  {match.type === 'league' ? `Jornada ${match.round}` : match.type === 'cup' ? `Ronda ${match.round}` : 'Amistoso'} ({format(new Date(match.date), 'dd/MM')})
+                              <p className="text-[8px] text-emerald-600 font-bold leading-snug line-clamp-2">
+                                <span className="inline-flex items-start gap-1">
+                                  <Calendar size={8} className="shrink-0 mt-0.5" />
+                                  <span>{formatMatchOptionLabel(match, seasons, opponents)}</span>
                                 </span>
-                                {season?.division && (
-                                  <span className="uppercase tracking-tighter opacity-70 ml-3">{season.division}</span>
-                                )}
                               </p>
                             );
                           })()

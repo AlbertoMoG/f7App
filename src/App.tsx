@@ -285,6 +285,7 @@ function AppShell({ user, onLogout }: AppShellProps) {
                   matches={matches}
                   stats={stats}
                   seasons={seasons}
+                  opponents={opponents}
                   injuries={injuries}
                   globalSeasonId={globalSeasonId}
                   initialMatchId={selectedMatchId}
