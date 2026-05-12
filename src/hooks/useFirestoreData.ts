@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { collection, onSnapshot, addDoc, query, where } from 'firebase/firestore';
+import { useState, useEffect, useCallback } from 'react';
+import { collection, onSnapshot, addDoc, query, where, getDocsFromServer } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { toast } from 'sonner';
 import { db } from '../firebase';
@@ -23,6 +23,9 @@ export interface FirestoreData {
   injuries: Injury[];
   standings: StandingsEntry[];
   leagueFixtures: LeagueFixture[];
+  /** Fuerza lectura desde el servidor y actualiza el estado local (complementa los listeners en tiempo real). */
+  syncDataFromServer: () => Promise<void>;
+  isSyncingData: boolean;
 }
 
 export function useFirestoreData(user: User | null): FirestoreData {
@@ -38,6 +41,70 @@ export function useFirestoreData(user: User | null): FirestoreData {
   const [injuries, setInjuries] = useState<Injury[]>([]);
   const [standings, setStandings] = useState<StandingsEntry[]>([]);
   const [leagueFixtures, setLeagueFixtures] = useState<LeagueFixture[]>([]);
+  const [isSyncingData, setIsSyncingData] = useState(false);
+
+  const syncDataFromServer = useCallback(async () => {
+    if (!user) return;
+    setIsSyncingData(true);
+    try {
+      const teamSnap = await getDocsFromServer(
+        query(collection(db, 'team'), where('ownerId', '==', user.uid))
+      );
+      if (teamSnap.empty) {
+        toast.error('No hay equipo asociado a tu cuenta');
+        return;
+      }
+      const currentTeam = { id: teamSnap.docs[0].id, ...teamSnap.docs[0].data() } as Team;
+      setTeam(currentTeam);
+
+      const tid = currentTeam.id;
+      const [
+        playersSnap,
+        seasonsSnap,
+        opponentsSnap,
+        matchesSnap,
+        statsSnap,
+        lineupsSnap,
+        fieldsSnap,
+        playerSeasonsSnap,
+        injuriesSnap,
+        standingsSnap,
+        leagueFixturesSnap,
+      ] = await Promise.all([
+        getDocsFromServer(query(collection(db, 'players'), where('teamId', '==', tid))),
+        getDocsFromServer(query(collection(db, 'seasons'), where('teamId', '==', tid))),
+        getDocsFromServer(query(collection(db, 'opponents'), where('teamId', '==', tid))),
+        getDocsFromServer(query(collection(db, 'matches'), where('teamId', '==', tid))),
+        getDocsFromServer(query(collection(db, 'playerStats'), where('teamId', '==', tid))),
+        getDocsFromServer(query(collection(db, 'lineups'), where('teamId', '==', tid))),
+        getDocsFromServer(query(collection(db, 'fields'), where('teamId', '==', tid))),
+        getDocsFromServer(query(collection(db, 'playerSeasons'), where('teamId', '==', tid))),
+        getDocsFromServer(query(collection(db, 'injuries'), where('teamId', '==', tid))),
+        getDocsFromServer(query(collection(db, 'standings'), where('teamId', '==', tid))),
+        getDocsFromServer(query(collection(db, 'leagueFixtures'), where('teamId', '==', tid))),
+      ]);
+
+      setPlayers(playersSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Player)));
+      setSeasons(seasonsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Season)));
+      setOpponents(opponentsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Opponent)));
+      setMatches(matchesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Match)));
+      setStats(statsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PlayerStat)));
+      setLineups(lineupsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Lineup)));
+      setFields(fieldsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Field)));
+      setPlayerSeasons(playerSeasonsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PlayerSeason)));
+      setInjuries(injuriesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Injury)));
+      setStandings(standingsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as StandingsEntry)));
+      setLeagueFixtures(leagueFixturesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as LeagueFixture)));
+
+      toast.success('Datos sincronizados con Firestore');
+    } catch (err) {
+      console.error('syncDataFromServer:', err);
+      handleFirestoreError(err, OperationType.LIST, 'sync-from-server');
+      toast.error('No se pudo sincronizar. Comprueba la conexión.');
+    } finally {
+      setIsSyncingData(false);
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -149,5 +216,7 @@ export function useFirestoreData(user: User | null): FirestoreData {
     team, players, playerSeasons, seasons, opponents,
     matches, stats, lineups, fields, injuries,
     standings, leagueFixtures,
+    syncDataFromServer,
+    isSyncingData,
   };
 }

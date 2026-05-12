@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Season, Opponent, MatchType, Match, Field } from '../types';
+import { isLeagueMatchCandidate } from '../lib/leagueStandingsAggregate';
+import { findConflictingLeagueLeg } from '../lib/leagueMatchLegValidation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -20,6 +22,7 @@ interface AddMatchProps {
   seasons: Season[];
   opponents: Opponent[];
   fields: Field[];
+  /** Recomendado para validar duplicados liga mismo rival/local o visitante. */
   matches?: Match[];
   onAddMatch?: (match: Omit<Match, 'id'>) => Promise<any>;
   onUpdateMatch?: (match: Match) => Promise<any>;
@@ -90,6 +93,23 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!seasonId || !opponentId || !date) return;
+
+    const homeFlag = isHome === 'true';
+    const roster = matches ?? [];
+    if (
+      isLeagueMatchCandidate(type, round ?? null) &&
+      findConflictingLeagueLeg(roster, {
+        seasonId,
+        opponentId,
+        isHome: homeFlag,
+        excludeMatchId: isEditing && matchToEdit ? matchToEdit.id : undefined,
+      })
+    ) {
+      toast.error(
+        'Ya tienes otro partido de liga con el mismo rival y la misma condición (local o visitante). Revisa Mis partidos.'
+      );
+      return;
+    }
 
     try {
       if (isEditing && matchToEdit && onUpdateMatch) {

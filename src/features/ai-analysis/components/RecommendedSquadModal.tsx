@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Sparkles, Trophy, Shield, LayoutGrid } from 'lucide-react';
+import { CheckCircle2, Sparkles, Trophy, Shield, LayoutGrid } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   buildOptimalRecommendedSquad,
@@ -139,6 +139,16 @@ export const RecommendedSquadModal = React.memo(function RecommendedSquadModal({
     outfieldSlots,
   ]);
 
+  /** Player ids with attendance "attending" for this match (real convocatoria in MatchStats). */
+  const realRosterPlayerIds = React.useMemo(() => {
+    if (!match) return new Set<string>();
+    return new Set(
+      stats
+        .filter((s) => s.matchId === match.id && s.attendance === 'attending')
+        .map((s) => s.playerId)
+    );
+  }, [match, stats]);
+
   const lineMin = getFormationLineMinimums(formation);
 
   if (!match) return null;
@@ -148,6 +158,7 @@ export const RecommendedSquadModal = React.memo(function RecommendedSquadModal({
   const hasGk = squad.some((p) => p.position === 'Portero');
   const squadBaremoAvg =
     squad.length > 0 ? squadMeanBaremo(squad, allPlayerRatings, teamAvgBaremo) : 0;
+  const overlapWithRealCount = squad.filter((p) => realRosterPlayerIds.has(p.id)).length;
 
   return (
     <Dialog open={!!matchId} onOpenChange={(open) => !open && onClose()}>
@@ -354,11 +365,25 @@ export const RecommendedSquadModal = React.memo(function RecommendedSquadModal({
                   </span>
                 )}
               </h3>
+              {squad.length > 0 && (
+                <p className="text-[10px] text-gray-600 px-1 font-medium">
+                  <span className="font-black text-emerald-700 uppercase tracking-wide">Coinciden con lista real:</span>{' '}
+                  {overlapWithRealCount} de {squad.length}
+                  {realRosterPlayerIds.size === 0 && (
+                    <span className="text-amber-700"> · Nadie marcado como asistiendo en el partido aún</span>
+                  )}
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {squad.map((player, idx) => (
+                {squad.map((player, idx) => {
+                  const inRealRoster = realRosterPlayerIds.has(player.id);
+                  return (
                   <div
                     key={player.id}
-                    className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex items-center gap-3"
+                    className={cn(
+                      'bg-white p-3 rounded-xl border shadow-sm flex items-center gap-3',
+                      inRealRoster ? 'border-emerald-300 ring-1 ring-emerald-100' : 'border-gray-100'
+                    )}
                   >
                     <span className="text-xs font-black text-gray-200 w-4">{idx + 1}</span>
                     <Avatar className="h-10 w-10 rounded-lg shrink-0 border border-gray-50">
@@ -376,24 +401,37 @@ export const RecommendedSquadModal = React.memo(function RecommendedSquadModal({
                       <p className="text-sm font-bold text-gray-900 truncate">
                         {player.alias || player.firstName}
                       </p>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          'text-[9px] h-4 px-1.5 font-bold border-none',
-                          player.position === 'Portero'
-                            ? 'bg-amber-100 text-amber-500'
-                            : player.position === 'Defensa'
-                              ? 'bg-blue-100 text-blue-500'
-                              : player.position === 'Medio'
-                                ? 'bg-emerald-100 text-emerald-500'
-                                : 'bg-red-100 text-red-500'
+                      <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'text-[9px] h-4 px-1.5 font-bold border-none',
+                            player.position === 'Portero'
+                              ? 'bg-amber-100 text-amber-500'
+                              : player.position === 'Defensa'
+                                ? 'bg-blue-100 text-blue-500'
+                                : player.position === 'Medio'
+                                  ? 'bg-emerald-100 text-emerald-500'
+                                  : 'bg-red-100 text-red-500'
+                          )}
+                        >
+                          {player.position}
+                        </Badge>
+                        {inRealRoster && (
+                          <Badge
+                            variant="outline"
+                            className="inline-flex items-center text-[8px] h-4 px-1.5 font-black uppercase border-none bg-emerald-600 text-white gap-0.5"
+                            title="Asistencia confirmada en la convocatoria del partido"
+                          >
+                            <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden />
+                            Lista real
+                          </Badge>
                         )}
-                      >
-                        {player.position}
-                      </Badge>
+                      </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>

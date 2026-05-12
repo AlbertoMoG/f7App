@@ -2,8 +2,10 @@ import type { LeagueFixture, Match, Opponent, StandingsEntry, Team } from '../ty
 import {
   aggregateLeagueStandingsFromResults,
   collectStandingsParticipantIds,
+  dedupeLeagueMatchesForAggregate,
   isFinishedLeagueFixture,
   isFinishedLeagueMatch,
+  leagueMatchStandingsDedupeKey,
 } from './leagueStandingsAggregate';
 
 export type LeagueStandingsAuditIssue = {
@@ -95,8 +97,7 @@ export function auditLeagueStandingsData(params: {
   for (const m of matches) {
     if (m.seasonId !== seasonId || !isFinishedLeagueMatch(m)) continue;
     if (team && m.teamId && m.teamId !== team.id) continue;
-    const leg = m.isHome === false ? 'away' : 'home';
-    const key = `${m.opponentId}\0${leg}`;
+    const key = leagueMatchStandingsDedupeKey(m);
     const list = matchKeyToIds.get(key) ?? [];
     list.push(m.id);
     matchKeyToIds.set(key, list);
@@ -181,6 +182,42 @@ export function auditLeagueStandingsData(params: {
           detail: `Participante: ${id}`,
         });
       }
+    }
+  }
+
+  if (team) {
+    const rawMyFinished = matches.filter(
+      (m) =>
+        m.seasonId === seasonId &&
+        isFinishedLeagueMatch(m) &&
+        (!m.teamId || m.teamId === team.id)
+    ).length;
+    const dedupedMyFinished = dedupeLeagueMatchesForAggregate(matches, seasonId).filter(
+      (m) =>
+        isFinishedLeagueMatch(m) && (!m.teamId || m.teamId === team.id)
+    ).length;
+    const autoMyPlayed = computed.get('my-team')?.played ?? 0;
+
+    if (dedupedMyFinished !== autoMyPlayed) {
+      issues.push({
+        severity: 'error',
+        code: 'MY_TEAM_PJ_INTERNAL_MISMATCH',
+        message: `Incoherencia: PJ automáticos de tu equipo (${autoMyPlayed}) no coinciden con partidos de liga deduplicados (${dedupedMyFinished}).`,
+        detail: 'Revisa el código de agregación o datos corruptos.',
+      });
+    } else if (rawMyFinished > dedupedMyFinished) {
+      issues.push({
+        severity: 'warning',
+        code: 'LEAGUE_DEDUP_COLLAPSED',
+        message: `Hay ${rawMyFinished} partidos de liga finalizados en Mis Partidos pero la tabla usa ${dedupedMyFinished} tras agrupar (misma clave rival+pierna, o un partido por id si falta isHome).`,
+        detail: `${rawMyFinished - dedupedMyFinished} encuentro(s) no suman PJ extra: suelen ser duplicados de la misma pierna.`,
+      });
+    } else if (rawMyFinished > 0 && duplicateFinishedMatchGroups === 0) {
+      issues.push({
+        severity: 'warning',
+        code: 'MY_TEAM_LEAGUE_ALIGNED',
+        message: `Coherencia: tus ${dedupedMyFinished} partido(s) de liga cerrado(s) con marcador se contabilizan en el cálculo automático (PJ tu equipo = ${autoMyPlayed}).`,
+      });
     }
   }
 

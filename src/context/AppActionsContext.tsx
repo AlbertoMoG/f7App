@@ -32,6 +32,9 @@ interface AppActionsContextValue {
   // Lineups
   saveLineup: (l: Omit<Lineup, 'id' | 'teamId'>) => Promise<void>;
   deleteLineup: (id: string) => Promise<void>;
+  /** Fuerza lectura desde Firestore (getDocsFromServer); no sustituye la edición manual de clasificación. */
+  syncDataFromServer: () => Promise<void>;
+  isSyncingData: boolean;
 }
 
 const AppActionsContext = createContext<AppActionsContextValue | null>(null);

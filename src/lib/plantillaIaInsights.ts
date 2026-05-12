@@ -1,5 +1,5 @@
 import type { Injury, Match, Player, PlayerSeason, PlayerStat, Season } from '../types';
-import { calculatePlayerRating, type PlayerRatingReport } from './ratingSystem';
+import { calculatePlayerRating, META_EXCELENCIA, type PlayerRatingReport } from './ratingSystem';
 import { buildSynergyMap, getSynergyKey, type SynergyData } from './synergyCalculator';
 
 export interface PositionStrengthRow {
@@ -27,6 +27,18 @@ export interface SynergyPairHighlight {
   isLethal: boolean;
 }
 
+/** Compromiso (asistencia) × rendimiento en puntos/partido al jugar; sólo jugadores con muestra mínima. */
+export interface LuckCharmPlayer {
+  playerId: string;
+  displayName: string;
+  position: string;
+  luckIndex: number;
+  notaCompromiso: number;
+  mediaPorPartido: number;
+  partidosAsistidos: number;
+  partidosComputables: number;
+}
+
 export interface PlantillaIaSnapshot {
   rosterSize: number;
   teamAvgBaremo: number;
@@ -34,7 +46,12 @@ export interface PlantillaIaSnapshot {
   byPosition: PositionStrengthRow[];
   lowReliability: LowReliabilityPlayer[];
   synergyPairs: SynergyPairHighlight[];
+  amuleto: LuckCharmPlayer | null;
+  malaSuerte: LuckCharmPlayer | null;
 }
+
+const MIN_ATTENDED_FOR_LUCK = 4;
+const MIN_COMPUTABLE_FOR_LUCK = 4;
 
 function displayName(p: Player): string {
   return (p.alias?.trim() || `${p.firstName} ${p.lastName}`).trim();
@@ -143,6 +160,45 @@ export function computePlantillaIaSnapshot(
     return y.matchCount - x.matchCount;
   });
 
+  const luckScored: LuckCharmPlayer[] = reports
+    .filter(
+      ({ r }) =>
+        r.partidosAsistidos >= MIN_ATTENDED_FOR_LUCK &&
+        r.partidosComputables >= MIN_COMPUTABLE_FOR_LUCK
+    )
+    .map(({ player, r }) => {
+      const luckIndex = (r.notaCompromiso / 100) * (r.mediaPorPartido / META_EXCELENCIA);
+      return {
+        playerId: player.id,
+        displayName: displayName(player),
+        position: player.position,
+        luckIndex,
+        notaCompromiso: r.notaCompromiso,
+        mediaPorPartido: r.mediaPorPartido,
+        partidosAsistidos: r.partidosAsistidos,
+        partidosComputables: r.partidosComputables,
+      };
+    });
+
+  let amuleto: LuckCharmPlayer | null = null;
+  let malaSuerte: LuckCharmPlayer | null = null;
+
+  if (luckScored.length > 0) {
+    const byName = (a: LuckCharmPlayer, b: LuckCharmPlayer) =>
+      a.displayName.localeCompare(b.displayName, 'es');
+
+    const maxVal = Math.max(...luckScored.map((x) => x.luckIndex));
+    const minVal = Math.min(...luckScored.map((x) => x.luckIndex));
+
+    amuleto = [...luckScored.filter((x) => x.luckIndex === maxVal)].sort(byName)[0] ?? null;
+
+    if (luckScored.length >= 2 && maxVal > minVal) {
+      const minGroup = [...luckScored.filter((x) => x.luckIndex === minVal)].sort(byName);
+      malaSuerte =
+        minGroup.find((m) => amuleto && m.playerId !== amuleto.playerId) ?? minGroup[1] ?? null;
+    }
+  }
+
   return {
     rosterSize: roster.length,
     teamAvgBaremo,
@@ -150,5 +206,7 @@ export function computePlantillaIaSnapshot(
     byPosition,
     lowReliability: lowReliability.slice(0, 12),
     synergyPairs: pairs.slice(0, 8),
+    amuleto,
+    malaSuerte,
   };
 }

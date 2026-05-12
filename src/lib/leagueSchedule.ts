@@ -1,6 +1,11 @@
 import type { Match } from '../types';
+import { isLeagueMatchForStandings } from './leagueStandingsAggregate';
+import { opponentIdsWithAmbiguousLeagueLeg } from './leagueMatchLegValidation';
 
-/** Dedup: one home + one away league fixture per opponent per season. */
+/**
+ * Dedup: una pierna local y una visitante explícitas por rival y temporada.
+ * Solo cuenta `isHome === true` / `isHome === false` (no se asume local por `undefined`).
+ */
 export function hasLeagueLeg(
   matches: Match[],
   seasonId: string,
@@ -11,8 +16,8 @@ export function hasLeagueLeg(
     (m) =>
       m.seasonId === seasonId &&
       m.opponentId === opponentId &&
-      m.type === 'league' &&
-      (isHome ? m.isHome !== false : m.isHome === false)
+      isLeagueMatchForStandings(m) &&
+      (isHome ? m.isHome === true : m.isHome === false)
   );
 }
 
@@ -39,13 +44,16 @@ export function buildMissingIdaYVueltaMatches(
   matches: Match[]
 ): LeagueMatchSeed[] {
   const sorted = [...new Set(opponentIds)].sort((a, b) => a.localeCompare(b));
+  const ambiguous = new Set(opponentIdsWithAmbiguousLeagueLeg(matches, seasonId, sorted));
   const fixtures: { opponentId: string; isHome: boolean }[] = [];
   for (const opp of sorted) {
+    if (ambiguous.has(opp)) continue;
     if (!hasLeagueLeg(matches, seasonId, opp, true)) {
       fixtures.push({ opponentId: opp, isHome: true });
     }
   }
   for (const opp of sorted) {
+    if (ambiguous.has(opp)) continue;
     if (!hasLeagueLeg(matches, seasonId, opp, false)) {
       fixtures.push({ opponentId: opp, isHome: false });
     }

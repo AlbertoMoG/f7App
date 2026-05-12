@@ -6,6 +6,7 @@ import {
   History,
   Swords,
   LayoutGrid,
+  Star,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -29,6 +30,7 @@ import { RivalsAnalysisTab } from '../features/ai-analysis/components/RivalsAnal
 import { useRivalThreatAnalysis } from '../features/ai-analysis/hooks/useRivalThreatAnalysis';
 import { RecommendedSquadModal } from '../features/ai-analysis/components/RecommendedSquadModal';
 import { IdealSquadTab } from '../features/ai-analysis/components/IdealSquadTab';
+import { BestSevenTab } from '../features/ai-analysis/components/BestSevenTab';
 import { SquadDetailModal } from '../features/ai-analysis/components/SquadDetailModal';
 import { buildSynergyMap } from '../lib/synergyCalculator';
 
@@ -50,13 +52,13 @@ interface AIAnalysisProps {
 
 export default function AIAnalysis(props: AIAnalysisProps) {
   const [activeAITab, setActiveAITab] = React.useState<
-    'predictions' | 'squads' | 'idealSquad' | 'rivals' | 'history'
+    'predictions' | 'squads' | 'idealSquad' | 'bestSeven' | 'rivals' | 'history'
   >('predictions');
   const [recommendedMatchId, setRecommendedMatchId] = React.useState<string | null>(null);
   const [selectedSquadMatchId, setSelectedSquadMatchId] = React.useState<string | null>(null);
 
   // Custom Hooks
-  const { allPlayerRatings } = usePlayerRatings(props);
+  const { allPlayerRatings, filteredPlayers } = usePlayerRatings(props);
 
   const synergyMap = React.useMemo(
     () => buildSynergyMap(props.matches, props.stats),
@@ -94,6 +96,11 @@ export default function AIAnalysis(props: AIAnalysisProps) {
     const s = props.seasons.find((x) => x.id === effectiveSeasonIdForRivals);
     return s?.name ?? (effectiveSeasonIdForRivals || '—');
   }, [props.seasons, effectiveSeasonIdForRivals]);
+
+  const bestSevenSeasonLabel = React.useMemo(() => {
+    if (props.globalSeasonId === 'all') return '';
+    return props.seasons.find((s) => s.id === props.globalSeasonId)?.name ?? props.globalSeasonId;
+  }, [props.globalSeasonId, props.seasons]);
 
   const scheduledMatches = React.useMemo(() => {
     return props.matches.filter(m => {
@@ -210,6 +217,16 @@ export default function AIAnalysis(props: AIAnalysisProps) {
             >
                 <LayoutGrid size={14} />
                 Convocatoria ideal IA
+            </div>
+            <div 
+                onClick={() => setActiveAITab('bestSeven')}
+                className={cn(
+                    "flex items-center gap-2 px-6 py-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-wider cursor-pointer select-none",
+                    activeAITab === 'bestSeven' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-400 hover:text-gray-500"
+                )}
+            >
+                <Star size={14} className={activeAITab === 'bestSeven' ? 'text-amber-500 fill-amber-400' : ''} />
+                Mejor 7
             </div>
             <div 
                 onClick={() => setActiveAITab('rivals')}
@@ -338,6 +355,13 @@ export default function AIAnalysis(props: AIAnalysisProps) {
             predictions={predictions}
             onOpenDetail={setRecommendedMatchId}
             onNavigateToMatch={props.onNavigateToMatch}
+          />
+        ) : activeAITab === 'bestSeven' ? (
+          <BestSevenTab
+            players={filteredPlayers}
+            allPlayerRatings={allPlayerRatings}
+            seasonLabel={bestSevenSeasonLabel}
+            isAllSeasons={props.globalSeasonId === 'all'}
           />
         ) : activeAITab === 'rivals' ? (
           <RivalsAnalysisTab

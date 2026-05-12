@@ -11,13 +11,14 @@ import {
   Menu,
   X,
   Shield,
-  ShieldAlert,
   ClipboardCheck,
   DollarSign,
-  Brain
+  Brain,
+  RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 import { Season } from '../types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -32,9 +33,12 @@ interface LayoutProps {
   seasons: Season[];
   globalSeasonId: string;
   setGlobalSeasonId: (id: string) => void;
+  /** Trae el último estado desde Firestore (partidos, stats, etc.). */
+  onSyncData?: () => void;
+  isSyncingData?: boolean;
 }
 
-export default function Layout({ children, activeTab, setActiveTab, user, team, onLogout, seasons, globalSeasonId, setGlobalSeasonId }: LayoutProps) {
+export default function Layout({ children, activeTab, setActiveTab, user, team, onLogout, seasons, globalSeasonId, setGlobalSeasonId, onSyncData, isSyncingData = false }: LayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
 
   const navItems = [
@@ -109,6 +113,35 @@ export default function Layout({ children, activeTab, setActiveTab, user, team, 
               </Select>
             </div>
           )}
+        </div>
+
+        <div className="px-3 pb-2">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cn(
+                    'w-full rounded-xl border-[#141414]/15 text-gray-600 hover:bg-emerald-50 hover:text-emerald-700',
+                    !isSidebarOpen && 'px-0 justify-center'
+                  )}
+                  disabled={!team?.id || isSyncingData}
+                  onClick={() => onSyncData?.()}
+                />
+              }
+            >
+              <RefreshCw
+                size={18}
+                className={cn('shrink-0', isSyncingData && 'animate-spin')}
+                aria-hidden
+              />
+              {isSidebarOpen && <span className="ml-2 font-medium">Sincronizar datos</span>}
+            </TooltipTrigger>
+            <TooltipContent side="right" className="max-w-[240px] text-left leading-snug">
+              Actualiza partidos y demás datos desde la base. La clasificación manual en su pantalla sigue disponible para casos excepcionales.
+            </TooltipContent>
+          </Tooltip>
         </div>
 
         <nav className="flex-1 px-3 space-y-1 overflow-y-auto scrollbar-hide">

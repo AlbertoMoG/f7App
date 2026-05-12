@@ -76,6 +76,10 @@ export default function InteligenciaIAWorkspace(props: InteligenciaIAWorkspacePr
           stats={props.stats}
           seasons={props.seasons}
           injuries={props.injuries}
+          opponents={props.opponents}
+          standings={props.standings ?? []}
+          fields={props.fields}
+          leagueFixtures={props.leagueFixtures}
           globalSeasonId={props.globalSeasonId}
         />
       ) : (

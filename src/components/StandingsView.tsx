@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   Table, 
   TableBody, 
@@ -27,6 +27,7 @@ import {
 import { db } from '../firebase';
 import { toast } from 'sonner';
 import { buildMissingIdaYVueltaMatches } from '../lib/leagueSchedule';
+import { opponentIdsWithAmbiguousLeagueLeg } from '../lib/leagueMatchLegValidation';
 import {
   aggregateLeagueStandingsFromResults,
   collectStandingsParticipantIds,
@@ -39,7 +40,7 @@ import {
   standingsEntryHasManualAdjustment,
 } from '../lib/leagueStandingsAudit';
 import { resetManualStandingsDeltaForSeason } from '../lib/resetManualStandingsForSeason';
-import { computeProjectedStandings } from '../lib/standingsProjection';
+import { computeProjectedStandings, type StandingsRowInput } from '../lib/standingsProjection';
 
 interface StandingsViewProps {
   team: Team | null;
@@ -64,6 +65,21 @@ interface ManualDelta {
 }
 
 const ZERO_DELTA: ManualDelta = { played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, points: 0 };
+
+function rowToCombinedStandingsInput(row: RowData): StandingsRowInput {
+  return {
+    opponentId: row.opponentId,
+    name: row.name,
+    shieldUrl: row.shieldUrl,
+    played: row.played + row.manualDelta.played,
+    won: row.won + row.manualDelta.won,
+    drawn: row.drawn + row.manualDelta.drawn,
+    lost: row.lost + row.manualDelta.lost,
+    points: row.points + row.manualDelta.points,
+    goalsFor: row.goalsFor + row.manualDelta.goalsFor,
+    goalsAgainst: row.goalsAgainst + row.manualDelta.goalsAgainst,
+  };
+}
 
 interface RowData {
   opponentId: string;
@@ -92,6 +108,7 @@ export default function StandingsView({ team, opponents, matches, standings, glo
   const [standingsSubTab, setStandingsSubTab] = useState<StandingsSubTab>('table');
   const [auditOpen, setAuditOpen] = useState(false);
   const [resettingManual, setResettingManual] = useState(false);
+  const generatingLeagueRef = useRef(false);
 
   const currentSeasonId = useMemo(() => {
     if (globalSeasonId !== 'all') return globalSeasonId;
@@ -129,6 +146,19 @@ export default function StandingsView({ team, opponents, matches, standings, glo
       toast.error('No hay rivales asignados a esta temporada');
       return;
     }
+    if (generatingLeagueRef.current) return;
+    generatingLeagueRef.current = true;
+    const ambiguousIds = opponentIdsWithAmbiguousLeagueLeg(matches, currentSeasonId, leagueOpponentIds);
+    if (ambiguousIds.length > 0) {
+      const names = ambiguousIds
+        .map((id) => opponents.find((o) => o.id === id)?.name ?? id)
+        .join(', ');
+      toast.error(
+        `Corrige Local/Visitante en tus partidos de liga antes de completar calendario. Rivales afectados: ${names}`
+      );
+      generatingLeagueRef.current = false;
+      return;
+    }
     setGeneratingLeague(true);
     try {
       const toAdd = buildMissingIdaYVueltaMatches(
@@ -153,6 +183,7 @@ export default function StandingsView({ team, opponents, matches, standings, glo
       console.error(e);
       toast.error('No se pudo generar el calendario');
     } finally {
+      generatingLeagueRef.current = false;
       setGeneratingLeague(false);
     }
   };
@@ -268,11 +299,17 @@ export default function StandingsView({ team, opponents, matches, standings, glo
     }
 
     return statsList.sort((a, b) => {
-      if (b.points !== a.points) return b.points - a.points;
-      const aDiff = a.goalsFor - a.goalsAgainst;
-      const bDiff = b.goalsFor - b.goalsAgainst;
+      const aPts = a.points + a.manualDelta.points;
+      const bPts = b.points + b.manualDelta.points;
+      if (bPts !== aPts) return bPts - aPts;
+      const aGF = a.goalsFor + a.manualDelta.goalsFor;
+      const aGC = a.goalsAgainst + a.manualDelta.goalsAgainst;
+      const bGF = b.goalsFor + b.manualDelta.goalsFor;
+      const bGC = b.goalsAgainst + b.manualDelta.goalsAgainst;
+      const aDiff = aGF - aGC;
+      const bDiff = bGF - bGC;
       if (bDiff !== aDiff) return bDiff - aDiff;
-      return b.goalsFor - a.goalsFor;
+      return bGF - aGF;
     });
   }, [
     participantIds,
@@ -285,9 +322,14 @@ export default function StandingsView({ team, opponents, matches, standings, glo
     leagueFixtures,
   ]);
 
+  const standingsForProjection = useMemo(
+    () => fullStandings.map(rowToCombinedStandingsInput),
+    [fullStandings]
+  );
+
   const predictedStandings = useMemo(
-    () => computeProjectedStandings(fullStandings, leagueFixtures, currentSeasonId ?? ''),
-    [fullStandings, leagueFixtures, currentSeasonId],
+    () => computeProjectedStandings(standingsForProjection, leagueFixtures, currentSeasonId ?? ''),
+    [standingsForProjection, leagueFixtures, currentSeasonId],
   );
 
   const handleInputChange = (opponentId: string, field: keyof StandingsEntry, value: string) => {
@@ -476,7 +518,7 @@ export default function StandingsView({ team, opponents, matches, standings, glo
           <CardDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span className="flex items-center gap-1.5">
               <Info className="h-3.5 w-3.5 shrink-0" />
-              Genera 2 partidos por rival (local y visitante). Los resultados ya cerrados se mantienen; solo crea huecos que falten.
+              Genera 2 partidos por rival con Local/Visitante definido. Solo crea piernas que falten; corrige antes partidos sin condición para evitar duplicados confusos.
             </span>
             <Button
               type="button"
@@ -745,7 +787,7 @@ export default function StandingsView({ team, opponents, matches, standings, glo
           </CardTitle>
           <CardDescription className="flex items-center gap-1.5 text-emerald-600/70">
             <TrendingUp className="h-3.5 w-3.5" />
-            Estimación de la clasificación final tras {(fullStandings.length - 1) * 2} jornadas. Incluye regresión a la media, forma reciente y nivel de confianza.
+            Estimación a partir de la clasificación actual (resultados + ajustes manuales guardados), extrapolada a {(fullStandings.length - 1) * 2} jornadas. Forma reciente desde liga entre equipos cuando aplica.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -852,8 +894,9 @@ export default function StandingsView({ team, opponents, matches, standings, glo
           <DialogHeader>
             <DialogTitle>Auditoría de clasificación</DialogTitle>
             <DialogDescription>
-              Comprueba duplicados, topes teóricos y ajustes manuales en Firestore para la temporada
-              actual. No borra partidos ni enfrentamientos.
+              Comprueba duplicados, topes teóricos, ajustes manuales en Firestore y{' '}
+              <strong>coherencia entre Mis Partidos de liga cerrados y el PJ automático de tu equipo</strong> (misma regla
+              de deduplicación que la tabla). No borra partidos ni enfrentamientos.
             </DialogDescription>
           </DialogHeader>
           {auditResult ? (
@@ -883,7 +926,9 @@ export default function StandingsView({ team, opponents, matches, standings, glo
                       'text-sm rounded-lg border p-2.5',
                       issue.severity === 'error'
                         ? 'border-red-200 bg-red-50/90 text-red-950'
-                        : 'border-amber-200 bg-amber-50/70 text-amber-950'
+                        : issue.code === 'MY_TEAM_LEAGUE_ALIGNED'
+                          ? 'border-emerald-200 bg-emerald-50/80 text-emerald-950'
+                          : 'border-amber-200 bg-amber-50/70 text-amber-950'
                     )}
                   >
                     <div className="font-medium leading-snug">{issue.message}</div>

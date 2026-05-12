@@ -2,10 +2,26 @@ import { collection, doc, query, where, getDocs, writeBatch, addDoc, updateDoc }
 import { toast } from 'sonner';
 import { db } from '../firebase';
 import type { Match, PlayerStat, Team } from '../types';
+import { isLeagueMatchCandidate } from '../lib/leagueStandingsAggregate';
+import { findConflictingLeagueLeg } from '../lib/leagueMatchLegValidation';
 
 export function useMatchActions(team: Team | null, matches: Match[]) {
   const addMatch = async (m: Omit<Match, 'id' | 'teamId'>) => {
     if (!team) return;
+    if (
+      isLeagueMatchCandidate(m.type, m.round) &&
+      (m.isHome === true || m.isHome === false) &&
+      findConflictingLeagueLeg(matches, {
+        seasonId: m.seasonId,
+        opponentId: m.opponentId,
+        isHome: m.isHome,
+      })
+    ) {
+      toast.error(
+        'Ya existe un partido de liga con el mismo rival y la misma condición (local o visitante). Cambia uno de los dos o elimina el duplicado.'
+      );
+      throw new Error('duplicate league leg');
+    }
     try {
       await addDoc(collection(db, 'matches'), { ...m, teamId: team.id });
       toast.success('Partido programado');
@@ -16,6 +32,21 @@ export function useMatchActions(team: Team | null, matches: Match[]) {
   };
 
   const updateMatch = async (m: Match) => {
+    if (
+      isLeagueMatchCandidate(m.type, m.round) &&
+      (m.isHome === true || m.isHome === false) &&
+      findConflictingLeagueLeg(matches, {
+        seasonId: m.seasonId,
+        opponentId: m.opponentId,
+        isHome: m.isHome,
+        excludeMatchId: m.id,
+      })
+    ) {
+      toast.error(
+        'Ya existe otro partido de liga con el mismo rival y la misma condición (local o visitante).'
+      );
+      throw new Error('duplicate league leg');
+    }
     const { id, ...matchData } = m;
     try {
       await updateDoc(doc(db, 'matches', m.id), matchData);

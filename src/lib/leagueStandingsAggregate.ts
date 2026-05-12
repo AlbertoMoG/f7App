@@ -1,17 +1,27 @@
 import type { LeagueFixture, Match, Opponent, Team } from '../types';
 
 /**
+ * Mismo criterio que `isLeagueMatchForStandings` sin necesitar un `Match` completo (formularios, validación).
+ */
+export function isLeagueMatchCandidate(
+  type: Match['type'] | null | undefined,
+  round?: string | null
+): boolean {
+  if (type === 'friendly' || type === 'cup') return false;
+  if (type === 'league') return true;
+  if (type == null) {
+    const r = round != null ? String(round).trim() : '';
+    return r.length > 0;
+  }
+  return false;
+}
+
+/**
  * Liga en “mis partidos”: excluye amistoso/copa.
  * Incluye `type === 'league'` y, por compatibilidad, `type` ausente si hay jornada (calendario de liga).
  */
 export function isLeagueMatchForStandings(m: Match): boolean {
-  if (m.type === 'friendly' || m.type === 'cup') return false;
-  if (m.type === 'league') return true;
-  if (m.type == null) {
-    const r = m.round != null ? String(m.round).trim() : '';
-    return r.length > 0;
-  }
-  return false;
+  return isLeagueMatchCandidate(m.type, m.round);
 }
 
 /** Partido de liga contabilizable en clasificación: cerrado y con marcador completo. */
@@ -56,8 +66,16 @@ function dedupeLeagueFixturesForAggregate(fixtures: LeagueFixture[], seasonId: s
   return out;
 }
 
-/** Un partido por temporada, rival y pierna (local/visitante) para no sumar duplicados en Firestore. */
-function dedupeLeagueMatchesForAggregate(matches: Match[], seasonId: string): Match[] {
+/** Clave de deduplicación alineada con la clasificación: rival+pierna si `isHome` es explícito; si no, una fila por `Match`. */
+export function leagueMatchStandingsDedupeKey(m: Match): string {
+  if (m.isHome === true || m.isHome === false) {
+    return `${m.opponentId}\0${m.isHome === false ? 'away' : 'home'}`;
+  }
+  return `${m.opponentId}\0match\0${m.id}`;
+}
+
+/** Un partido por fila de Firestore; sólo colapsa rivales con misma pierna si `isHome` es explícito. */
+export function dedupeLeagueMatchesForAggregate(matches: Match[], seasonId: string): Match[] {
   const sorted = [...matches]
     .filter((m) => m.seasonId === seasonId && isLeagueMatchForStandings(m))
     .sort((a, b) => {
@@ -69,8 +87,7 @@ function dedupeLeagueMatchesForAggregate(matches: Match[], seasonId: string): Ma
   const seen = new Set<string>();
   const out: Match[] = [];
   for (const m of sorted) {
-    const leg = m.isHome === false ? 'away' : 'home';
-    const key = `${m.opponentId}\0${leg}`;
+    const key = leagueMatchStandingsDedupeKey(m);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(m);
@@ -111,8 +128,9 @@ function addMatchResult(s: LeagueStandingStats, goalsFor: number, goalsAgainst: 
 }
 
 /**
- * Estadísticas de liga por equipo: solo partidos `type === 'league'` completados
- * en "mis partidos" y en `leagueFixtures` (liga entre equipos del grupo).
+ * Estadísticas de liga por equipo: “mis partidos” de liga (finalizados con marcador),
+ * después de deduplicar rivales+pierna si `isHome` viene informado; si no, cuenta cada `Match` como encuentro aparte.
+ * Más los `leagueFixtures` del grupo cuando aplican.
  */
 export function aggregateLeagueStandingsFromResults(
   seasonId: string,

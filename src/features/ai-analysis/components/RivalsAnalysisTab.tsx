@@ -128,6 +128,10 @@ function AnalysisColumnsHeader({ headerTone, sortKey, sortDir, onSort }: Columns
       'Club analizado: puede ser un rival de la temporada o tu propio equipo en la segunda tabla.',
     factores:
       'Argumentos del índice: H2H directo en liga, forma reciente vs media de temporada, índice ataque/defensa vs media de goles del grupo, racha consecutiva activa, PPG vs mediana del grupo y clasificación.',
+    ppg:
+      'PPG (points per game, puntos por partido): media de puntos de clasificación que el equipo suma por encuentro jugado en liga, calculada sobre la ventana de partidos/fixtures que usa el modelo. Suele aparecer también la mediana de PPG del grupo para ver si ese rival va por encima o por debajo del ritmo «normal» del resto.',
+    h2hLiga:
+      'Liga H2H: cara a cara específico entre tu equipo y ese rival sólo en partidos de competición liguera (no amistosos ni otros formatos salvo integración puntual del calendario). Refleja cuántos choques lleváis jugados y el bagaje típico (goles, resultados recientes entre ambos si el modelo los expone junto al contador).',
     forma:
       'Para rivales: tendencia de goles recientes vs su propia media de temporada en fixtures del grupo. Para tu equipo: tendencia sobre tus últimos partidos de liga registrados. Una flecha ↑ en Ataque indica que está marcando más que su media; ↓ en Encaje indica que está encajando más.',
     racha:
@@ -150,10 +154,10 @@ function AnalysisColumnsHeader({ headerTone, sortKey, sortDir, onSort }: Columns
         <Hint className={cn('min-w-[13rem] max-w-[18rem]', th)} tip={tips.factores}>
           <span>Factores</span>
         </Hint>
-        <Hint className={cn('text-center w-[8rem]', th)} tip="Puntos por partido vs mediana del grupo" alignCenter sortable="ppg">
+        <Hint className={cn('text-center w-[8rem]', th)} tip={tips.ppg} alignCenter sortable="ppg">
           <span>PPG</span>
         </Hint>
-        <Hint className={cn('min-w-[7rem]', th)} tip="Enfrentamientos H2H en liga" sortable="h2hPlayed">
+        <Hint className={cn('min-w-[7rem]', th)} tip={tips.h2hLiga} sortable="h2hPlayed">
           <span>Liga H2H</span>
         </Hint>
         <Hint className={cn('min-w-[9rem]', th)} tip={tips.forma}>
@@ -508,7 +512,8 @@ export function RivalsAnalysisTab({
                 </TooltipContent>
               </Tooltip>
             </CardTitle>
-            <CardDescription className="mt-1">
+            <CardDescription className="mt-1 space-y-1.5">
+              <span>
               Temporada: <strong>{seasonLabel}</strong>
               {isAllSeasonsNote ? (
                 <span className="text-amber-700/90">
@@ -516,6 +521,14 @@ export function RivalsAnalysisTab({
                   (filtro "todas"; se usa la temporada más reciente para este análisis)
                 </span>
               ) : null}
+              </span>
+              <p className="text-xs text-muted-foreground max-w-3xl leading-relaxed pt-1">
+                <strong className="text-foreground">PPG:</strong>{' '}
+                puntos de clasificación por partido jugado en liga, respecto al ritmo del grupo y su mediana.{' '}
+                <strong className="text-foreground">Liga H2H:</strong>{' '}
+                historial directo entre tú y ese rival únicamente en partidos ligueros. Pasa el cursor por las cabeceras
+                de columna para el detalle corto de cada campo.
+              </p>
             </CardDescription>
           </div>
         </div>

@@ -47,6 +47,8 @@ export default function App() {
     team, players, playerSeasons, seasons, opponents,
     matches, stats, lineups, fields, injuries,
     standings, leagueFixtures,
+    syncDataFromServer,
+    isSyncingData,
   } = useFirestoreData(user);
 
   useEffect(() => {
@@ -121,6 +123,8 @@ export default function App() {
     addOpponent, updateOpponent, deleteOpponent,
     addField, updateField, deleteField,
     saveLineup, deleteLineup,
+    syncDataFromServer,
+    isSyncingData,
   };
 
   return (
@@ -161,6 +165,8 @@ function AppShell({ user, onLogout }: AppShellProps) {
     addOpponent, updateOpponent, deleteOpponent,
     addField, updateField, deleteField,
     saveLineup, deleteLineup,
+    syncDataFromServer,
+    isSyncingData,
   } = useAppActions();
 
   return (
@@ -178,6 +184,8 @@ function AppShell({ user, onLogout }: AppShellProps) {
               seasons={seasons}
               globalSeasonId={globalSeasonId}
               setGlobalSeasonId={setGlobalSeasonId}
+              onSyncData={syncDataFromServer}
+              isSyncingData={isSyncingData}
             >
               {activeTab === 'dashboard' && (
                 <Dashboard
@@ -323,6 +331,7 @@ function AppShell({ user, onLogout }: AppShellProps) {
               seasons={seasons}
               opponents={opponents}
               fields={fields}
+              matches={matches}
               onAddMatch={addMatch}
             />
           } />

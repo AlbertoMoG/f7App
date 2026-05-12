@@ -23,7 +23,8 @@ import {
   Sparkles,
   Info,
   ChevronRight,
-  Brain
+  Brain,
+  Timer
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -67,6 +68,62 @@ import { toast } from 'sonner';
 import { calculatePlayerRating } from '../lib/ratingSystem';
 import { LazyTopPlayersCard } from './LazyTopPlayersCard';
 import AttendanceChart from './AttendanceChart';
+
+function NextMatchCountdown({ matchDateIso }: { matchDateIso: string }) {
+  const [, bump] = React.useReducer((n: number) => n + 1, 0);
+  React.useEffect(() => {
+    const id = window.setInterval(() => bump(), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const target = new Date(matchDateIso).getTime();
+  if (Number.isNaN(target)) return null;
+
+  const ms = target - Date.now();
+  const totalSec = Math.floor(Math.max(0, ms) / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+
+  let body: React.ReactNode;
+  if (ms <= 0) {
+    body = (
+      <p className="text-sm font-semibold text-amber-300/95 text-center py-0.5 leading-snug">
+        La fecha del partido ya pasó: actualiza el calendario o registra el resultado.
+      </p>
+    );
+  } else if (totalSec < 3600) {
+    body = (
+      <p className="text-center text-lg font-black tabular-nums text-white py-1">Menos de 1 hora</p>
+    );
+  } else {
+    body = (
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-xl bg-emerald-900/60 border border-emerald-700/40 px-2 py-2.5 text-center">
+          <div className="text-2xl font-black tabular-nums leading-none">{days}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-400/90 mt-1">
+            {days === 1 ? 'día' : 'días'}
+          </div>
+        </div>
+        <div className="rounded-xl bg-emerald-900/60 border border-emerald-700/40 px-2 py-2.5 text-center">
+          <div className="text-2xl font-black tabular-nums leading-none">{hours}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-400/90 mt-1">
+            {hours === 1 ? 'hora' : 'horas'}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <Timer size={14} className="text-emerald-400 shrink-0" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Cuenta atrás</span>
+      </div>
+      {body}
+    </div>
+  );
+}
 
 interface DashboardProps {
   teamId?: string;
@@ -599,15 +656,22 @@ export default function Dashboard({
               </div>
               
               {nextMatchInfo && (
-                <div className="mt-6 pt-4 border-t border-emerald-800/50 flex flex-wrap gap-3">
-                  <div className="flex items-center gap-1.5 text-emerald-200">
-                    <Calendar size={14} className="text-emerald-400" />
-                    <span className="text-sm font-semibold">{format(new Date(nextMatchInfo.match.date), "d MMM, yyyy", { locale: es })}</span>
+                <div className="mt-6 pt-4 border-t border-emerald-800/50 space-y-4">
+                  <div className="flex flex-wrap gap-3">
+                    <div className="flex items-center gap-1.5 text-emerald-200">
+                      <Calendar size={14} className="text-emerald-400" />
+                      <span className="text-sm font-semibold">
+                        {format(new Date(nextMatchInfo.match.date), 'd MMM, yyyy', { locale: es })}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-emerald-200">
+                      <Clock size={14} className="text-emerald-400" />
+                      <span className="text-sm font-semibold">
+                        {format(new Date(nextMatchInfo.match.date), 'HH:mm')}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 text-emerald-200">
-                    <Clock size={14} className="text-emerald-400" />
-                    <span className="text-sm font-semibold">{format(new Date(nextMatchInfo.match.date), "HH:mm")}</span>
-                  </div>
+                  <NextMatchCountdown matchDateIso={nextMatchInfo.match.date} />
                 </div>
               )}
             </div>

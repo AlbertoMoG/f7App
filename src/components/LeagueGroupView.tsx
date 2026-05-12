@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import {
   Table,
   TableBody,
@@ -61,6 +61,7 @@ export default function LeagueGroupView({
   embedded = false,
 }: LeagueGroupViewProps) {
   const [generating, setGenerating] = useState(false);
+  const generatingRef = useRef(false);
   const [tableSort, setTableSort] = useState<LeagueTableSort>('round');
   const [filterTeamId, setFilterTeamId] = useState<string>('');
 
@@ -178,6 +179,8 @@ export default function LeagueGroupView({
       toast.error('Hacen falta al menos 2 rivales en la temporada');
       return;
     }
+    if (generatingRef.current) return;
+    generatingRef.current = true;
     setGenerating(true);
     try {
       const toAdd = buildMissingRoundRobinFixtures(
@@ -202,6 +205,7 @@ export default function LeagueGroupView({
       console.error(e);
       toast.error('No se pudo generar el calendario');
     } finally {
+      generatingRef.current = false;
       setGenerating(false);
     }
   };
