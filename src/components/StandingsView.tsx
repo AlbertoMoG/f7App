@@ -11,9 +11,11 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Trophy, Save, ListRestart, Info, Brain, TrendingUp, CalendarRange, Loader2, ExternalLink, UsersRound, ShieldAlert } from 'lucide-react';
+import { Trophy, Save, ListRestart, Info, Brain, TrendingUp, CalendarRange, Loader2, ExternalLink, UsersRound, ShieldAlert, Calendar } from 'lucide-react';
 import { Match, Opponent, StandingsEntry, Team, Season, LeagueFixture } from '../types';
 import { cn } from '@/lib/utils';
+import { formatMatchDate } from '@/lib/matchDisplayLabel';
+import { toOpponentMap } from '@/lib/entityIndex';
 import LeagueGroupView from './LeagueGroupView';
 import { collection, addDoc, updateDoc, doc, writeBatch } from 'firebase/firestore';
 import {
@@ -41,6 +43,7 @@ import {
 } from '../lib/leagueStandingsAudit';
 import { resetManualStandingsDeltaForSeason } from '../lib/resetManualStandingsForSeason';
 import { computeProjectedStandings, type StandingsRowInput } from '../lib/standingsProjection';
+import { EmptyStateCard } from '@/components/EmptyStateCard';
 
 interface StandingsViewProps {
   team: Team | null;
@@ -131,6 +134,8 @@ export default function StandingsView({ team, opponents, matches, standings, glo
         return new Date(a.date).getTime() - new Date(b.date).getTime();
       });
   }, [matches, currentSeasonId]);
+
+  const opponentById = useMemo(() => toOpponentMap(opponents), [opponents]);
 
   const currentSeason = useMemo(
     () => seasons.find((s) => s.id === currentSeasonId),
@@ -443,11 +448,13 @@ export default function StandingsView({ team, opponents, matches, standings, glo
 
   if (!currentSeasonId) {
     return (
-      <div className="flex flex-col items-center justify-center p-12 text-center bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
-        <Trophy className="h-12 w-12 text-gray-300 mb-4" />
-        <h3 className="text-lg font-medium text-gray-900">No hay temporada seleccionada</h3>
-        <p className="text-gray-500 max-w-xs">Selecciona o crea una temporada para ver la clasificación del equipo.</p>
-      </div>
+      <EmptyStateCard
+        icon={Trophy}
+        title="No hay temporada seleccionada"
+        description="Selecciona una temporada en el menú lateral o crea una nueva para ver la clasificación del equipo."
+        primaryAction={{ label: 'Nueva temporada', to: '/seasons/new' }}
+        secondaryAction={{ label: 'Ir al inicio', to: '/' }}
+      />
     );
   }
 
@@ -540,9 +547,13 @@ export default function StandingsView({ team, opponents, matches, standings, glo
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           {leagueMatches.length === 0 ? (
-            <div className="p-8 text-center text-gray-500 text-sm">
-              No hay partidos de liga en esta temporada. Usa el botón superior o créalos desde Partidos.
-            </div>
+            <EmptyStateCard
+              className="rounded-none border-0 border-t border-gray-100 shadow-none"
+              icon={Calendar}
+              title="Sin partidos de liga"
+              description="Aún no hay partidos de liga en esta temporada. Genera el calendario arriba o créalos desde la sección Partidos."
+              primaryAction={{ label: 'Programar partido', to: '/matches/new' }}
+            />
           ) : (
             <Table>
               <TableHeader className="bg-gray-50">
@@ -558,7 +569,7 @@ export default function StandingsView({ team, opponents, matches, standings, glo
               </TableHeader>
               <TableBody>
                 {leagueMatches.map((m) => {
-                  const opp = opponents.find((o) => o.id === m.opponentId);
+                  const opp = opponentById.get(m.opponentId);
                   const scoreLabel =
                     m.status === 'completed' &&
                     m.scoreTeam != null &&
@@ -576,11 +587,7 @@ export default function StandingsView({ team, opponents, matches, standings, glo
                         />
                       </TableCell>
                       <TableCell className="text-sm text-gray-600 whitespace-nowrap">
-                        {new Date(m.date).toLocaleDateString('es-ES', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                        })}
+                        {formatMatchDate(m, 'listMedium')}
                       </TableCell>
                       <TableCell className="font-medium">{opp?.name ?? m.opponentId}</TableCell>
                       <TableCell className="text-center text-xs">

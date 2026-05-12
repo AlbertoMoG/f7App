@@ -6,9 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Shield, Calendar, MapPin, Target, TrendingUp, Sparkles, Navigation, Clock, ExternalLink, Brain, Info } from 'lucide-react';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+import { formatMatchDate } from '@/lib/matchDisplayLabel';
 
 interface PredictionCardProps {
   match: Match;
@@ -221,7 +220,7 @@ export const PredictionCard = React.memo(function PredictionCard({
                     </div>
                     <div className="min-w-0">
                         <p className="text-[9px] font-black text-gray-400 uppercase leading-none mb-0.5">Fecha</p>
-                        <p className="text-[10px] font-bold text-gray-700 truncate">{format(new Date(match.date), 'dd MMM yyyy', { locale: es })}</p>
+                        <p className="text-[10px] font-bold text-gray-700 truncate">{formatMatchDate(match, 'listMedium')}</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 p-2 bg-white rounded-xl border border-gray-100 shadow-sm">
@@ -230,7 +229,7 @@ export const PredictionCard = React.memo(function PredictionCard({
                     </div>
                     <div className="min-w-0">
                         <p className="text-[9px] font-black text-gray-400 uppercase leading-none mb-0.5">Hora</p>
-                        <p className="text-[10px] font-bold text-gray-700 truncate">{format(new Date(match.date), 'HH:mm')}</p>
+                        <p className="text-[10px] font-bold text-gray-700 truncate">{formatMatchDate(match, 'listTime')}</p>
                     </div>
                 </div>
             </div>

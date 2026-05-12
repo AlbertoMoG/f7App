@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { startTransition, useDeferredValue } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useNavigate } from 'react-router-dom';
 import { 
   Plus, 
@@ -67,7 +68,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Player, Match, PlayerStat, Season, Opponent, Team, Field, Lineup, Injury, PlayerSeason, StandingsEntry } from '../types';
 import { 
-  format, 
   startOfMonth, 
   endOfMonth, 
   startOfWeek, 
@@ -79,12 +79,17 @@ import {
   isSameMonth, 
   isToday 
 } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
+import { formatDatePreset, formatMatchDate, getOpponentName, getSeasonName } from '@/lib/matchDisplayLabel';
+import { toFieldMap, toLineupByMatchIdMap, toOpponentMap, toPlayerMap, toSeasonMap } from '@/lib/entityIndex';
+import { EmptyStateCard } from '@/components/EmptyStateCard';
 import { toast } from 'sonner';
 import { standingsEntryHasManualAdjustment } from '../lib/leagueStandingsAudit';
 import { resetManualStandingsDeltaForSeason } from '../lib/resetManualStandingsForSeason';
+
+/** Above this count, list mode uses a virtualized scroll container. */
+const MATCH_LIST_VIRTUAL_THRESHOLD = 32;
 
 interface MatchListProps {
   team: Team | null;
@@ -268,22 +273,67 @@ export default function MatchList({
     if (filterOpponent !== 'all' && globalSeasonId !== 'all') {
       const opponentIdsInSeason = new Set(matches.filter(m => m.seasonId === globalSeasonId).map(m => m.opponentId));
       if (!opponentIdsInSeason.has(filterOpponent)) {
-        setFilterOpponent('all');
+        startTransition(() => setFilterOpponent('all'));
       }
     }
   }, [globalSeasonId, matches, filterOpponent]);
 
-  // Filtrar y ordenar partidos por fecha descendente
-  const filteredMatches = matches.filter(m => {
-    const date = new Date(m.date);
-    const matchOpponent = filterOpponent === 'all' || m.opponentId === filterOpponent;
-    const matchSeason = globalSeasonId === 'all' || m.seasonId === globalSeasonId;
-    const matchTypeFilter = filterType === 'all' || m.type === filterType;
-    const matchMonth = filterMonth === 'all' || date.getMonth().toString() === filterMonth;
-    const matchYear = filterYear === 'all' || date.getFullYear().toString() === filterYear;
-    const matchStatus = filterStatus === 'all' || m.status === filterStatus;
-    return matchOpponent && matchSeason && matchTypeFilter && matchMonth && matchYear && matchStatus;
-  }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const opponentById = React.useMemo(() => toOpponentMap(opponents), [opponents]);
+  const seasonById = React.useMemo(() => toSeasonMap(seasons), [seasons]);
+  const fieldById = React.useMemo(() => toFieldMap(fields), [fields]);
+  const lineupByMatchId = React.useMemo(() => toLineupByMatchIdMap(lineups), [lineups]);
+  const playerById = React.useMemo(() => toPlayerMap(players), [players]);
+
+  const filteredMatches = React.useMemo(() => {
+    return matches
+      .filter((m) => {
+        const date = new Date(m.date);
+        const matchOpponent = filterOpponent === 'all' || m.opponentId === filterOpponent;
+        const matchSeason = globalSeasonId === 'all' || m.seasonId === globalSeasonId;
+        const matchTypeFilter = filterType === 'all' || m.type === filterType;
+        const matchMonth = filterMonth === 'all' || date.getMonth().toString() === filterMonth;
+        const matchYear = filterYear === 'all' || date.getFullYear().toString() === filterYear;
+        const matchStatus = filterStatus === 'all' || m.status === filterStatus;
+        return matchOpponent && matchSeason && matchTypeFilter && matchMonth && matchYear && matchStatus;
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [
+    matches,
+    filterOpponent,
+    globalSeasonId,
+    filterType,
+    filterMonth,
+    filterYear,
+    filterStatus,
+  ]);
+
+  const matchesByMonth = React.useMemo(() => {
+    return filteredMatches.reduce(
+      (acc, match) => {
+        const monthYear = formatDatePreset(match.date, 'calendarMonthYear');
+        if (!acc[monthYear]) acc[monthYear] = [];
+        acc[monthYear].push(match);
+        return acc;
+      },
+      {} as Record<string, Match[]>
+    );
+  }, [filteredMatches]);
+
+  const deferredFilteredMatches = useDeferredValue(filteredMatches);
+  const listStaggerEnabled = filteredMatches.length <= 24;
+
+  const listScrollParentRef = React.useRef<HTMLDivElement>(null);
+  const listVirtualActive =
+    viewMode === 'list' && deferredFilteredMatches.length > MATCH_LIST_VIRTUAL_THRESHOLD;
+
+  const listVirtualizer = useVirtualizer({
+    count: listVirtualActive ? deferredFilteredMatches.length : 0,
+    getScrollElement: () => listScrollParentRef.current,
+    estimateSize: () => 200,
+    overscan: 8,
+    gap: 16,
+    getItemKey: (index) => deferredFilteredMatches[index]?.id ?? index,
+  });
 
   // Próximos 5 partidos programados
   const upcomingMatches = React.useMemo(() => {
@@ -297,13 +347,6 @@ export default function MatchList({
   }, [matches, globalSeasonId]);
 
   // Group matches by month for compact view
-  const matchesByMonth = filteredMatches.reduce((acc, match) => {
-    const monthYear = format(new Date(match.date), 'MMMM yyyy', { locale: es });
-    if (!acc[monthYear]) acc[monthYear] = [];
-    acc[monthYear].push(match);
-    return acc;
-  }, {} as Record<string, Match[]>);
-
   const calendarDays = React.useMemo(() => {
     const start = startOfWeek(startOfMonth(currentCalendarDate), { weekStartsOn: 1 });
     const end = endOfWeek(endOfMonth(currentCalendarDate), { weekStartsOn: 1 });
@@ -316,6 +359,192 @@ export default function MatchList({
 
   const nextMonth = () => setCurrentCalendarDate(addMonths(currentCalendarDate, 1));
   const prevMonth = () => setCurrentCalendarDate(subMonths(currentCalendarDate, 1));
+
+  function renderListMatchRow(match: Match) {
+    const opponent = opponentById.get(match.opponentId);
+    const season = seasonById.get(match.seasonId);
+    const rivalName = getOpponentName(opponentById, match.opponentId, 'RIVAL');
+    const isCompleted = match.status === 'completed';
+    const isWin = isCompleted && (match.scoreTeam || 0) > (match.scoreOpponent || 0);
+    const isLoss = isCompleted && (match.scoreTeam || 0) < (match.scoreOpponent || 0);
+    const associatedLineup = lineupByMatchId.get(match.id);
+
+    return (
+      <Card className="border-none shadow-sm hover:shadow-md transition-all overflow-hidden rounded-2xl group">
+        <CardContent className="p-0">
+          <div className="flex flex-col sm:flex-row items-center">
+            {/* Status Indicator */}
+            <div className={cn(
+              "w-full sm:w-2 h-2 sm:h-auto self-stretch",
+              !isCompleted ? "bg-blue-400" : isWin ? "bg-emerald-500" : isLoss ? "bg-red-500" : "bg-gray-400"
+            )} />
+            
+            <div className="flex-1 p-4 flex flex-col sm:flex-row items-center gap-4 w-full">
+              <div className="text-center sm:text-left min-w-[120px] flex flex-col justify-center">
+                <div className="mb-2 flex flex-wrap gap-1 justify-center sm:justify-start">
+                  {match.type === 'league' && <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 border-none">Liga {match.round ? `- ${match.round}` : ''}</Badge>}
+                  {match.type === 'cup' && <Badge variant="secondary" className="bg-purple-50 text-purple-700 hover:bg-purple-100 border-none">Copa {match.round ? `- ${match.round}` : ''}</Badge>}
+                  {(!match.type || match.type === 'friendly') && <Badge variant="secondary" className="bg-orange-50 text-orange-700 hover:bg-orange-100 border-none">Amistoso</Badge>}
+                  {season && (
+                    <Badge variant="outline" className="text-gray-500 border-gray-200">
+                      {season.name} {season.division && `(${season.division})`}
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex items-center justify-center sm:justify-start gap-2 mb-2 sm:hidden">
+                  <p className="text-sm font-black truncate max-w-[250px]">
+                    {match.isHome !== false ? (team?.name || 'MI EQUIPO') : rivalName} 
+                    <span className="mx-2 text-gray-300 font-normal">vs</span>
+                    {match.isHome !== false ? rivalName : (team?.name || 'MI EQUIPO')}
+                  </p>
+                </div>
+                <div className="flex items-center justify-center sm:justify-start gap-2 text-gray-500">
+                  <div className="text-center">
+                    <p className="text-xs font-bold uppercase tracking-wider">
+                      {formatMatchDate(match, 'listWeekday')}
+                    </p>
+                    <p className="text-lg font-bold text-[#141414]">
+                      {formatMatchDate(match, 'listDayMonth')}
+                    </p>
+                  </div>
+                  <div className="h-8 w-px bg-gray-200 mx-2 hidden sm:block"></div>
+                  <div className="text-left hidden sm:block">
+                    <p className="text-xs flex items-center gap-1.5 font-medium">
+                      <Clock size={12} /> {formatMatchDate(match, 'listTime')}
+                    </p>
+                    {(match.fieldId || match.location) && (
+                      <div className="text-xs flex items-center gap-1.5 mt-0.5">
+                        <MapPin size={12} className="text-emerald-600" /> 
+                        {match.fieldId ? (
+                          (() => {
+                            const field = match.fieldId ? fieldById.get(match.fieldId) : undefined;
+                            return field?.location ? (
+                              <a 
+                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(field.location)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="hover:text-emerald-600 transition-colors truncate max-w-[120px]"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {field.name}
+                              </a>
+                            ) : (
+                              <span className="truncate max-w-[120px]">{field?.name || 'Campo desconocido'}</span>
+                            );
+                          })()
+                        ) : (
+                          <span className="truncate max-w-[120px]">{match.location}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 flex items-center justify-center gap-4 sm:gap-8 w-full">
+                {/* Home Team */}
+                  <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+                    <span className="text-xl font-black truncate w-full text-center">
+                      {match.isHome !== false ? (team?.name || 'MI EQUIPO') : rivalName}
+                    </span>
+                    {match.isHome !== false ? (
+                      team?.shieldUrl ? <img src={team.shieldUrl} alt={team.name} className="w-20 h-24 rounded-xl object-cover border bg-white shadow-md" referrerPolicy="no-referrer" /> : <div className="w-20 h-24 rounded-xl bg-gray-100" />
+                    ) : (
+                      opponent?.shieldUrl ? <img src={opponent.shieldUrl} alt={opponent.name} className="w-20 h-24 rounded-xl object-cover border bg-white shadow-md" referrerPolicy="no-referrer" /> : <div className="w-20 h-24 rounded-xl bg-gray-100" />
+                    )}
+                  </div>
+
+                <div className="flex flex-col items-center gap-2">
+                  {isCompleted && (
+                    <Badge className={cn(
+                      "text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border shadow-none",
+                      isWin ? "bg-emerald-500 text-white border-emerald-400" :
+                      isLoss ? "bg-red-500 text-white border-red-400" :
+                      "bg-gray-400 text-white border-gray-300"
+                    )}>
+                      {isWin ? 'Victoria' : isLoss ? 'Derrota' : 'Empate'}
+                    </Badge>
+                  )}
+                  <div className="flex items-center gap-4">
+                    {isCompleted ? (
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "text-4xl font-black w-14 h-14 flex items-center justify-center rounded-2xl shadow-sm border-2",
+                          isWin ? "bg-emerald-50 border-emerald-200 text-emerald-600" :
+                          isLoss ? "bg-red-50 border-red-200 text-red-600" :
+                          "bg-gray-50 border-gray-200 text-gray-500"
+                        )}>
+                          {match.isHome !== false ? match.scoreTeam : match.scoreOpponent}
+                        </div>
+                        <span className="text-gray-300 font-bold text-2xl">-</span>
+                        <div className={cn(
+                          "text-4xl font-black w-14 h-14 flex items-center justify-center rounded-2xl shadow-sm border-2",
+                          isWin ? "bg-emerald-50 border-emerald-200 text-emerald-600" :
+                          isLoss ? "bg-red-50 border-red-200 text-red-600" :
+                          "bg-gray-50 border-gray-200 text-gray-500"
+                        )}>
+                          {match.isHome !== false ? match.scoreOpponent : match.scoreTeam}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="px-6 py-2 bg-blue-50 text-blue-600 rounded-xl font-bold flex items-center gap-2">
+                        <Clock size={16} />
+                        PENDIENTE
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Away Team */}
+                <div className="flex-1 flex flex-col items-center gap-2 hidden sm:flex">
+                  <span className="text-xl font-black truncate w-full text-center">
+                    {match.isHome !== false ? rivalName : (team?.name || 'MI EQUIPO')}
+                  </span>
+                  {match.isHome !== false ? (
+                    opponent?.shieldUrl ? <img src={opponent.shieldUrl} alt={opponent.name} className="w-20 h-24 rounded-xl object-cover border bg-white shadow-md" referrerPolicy="no-referrer" /> : <div className="w-20 h-24 rounded-xl bg-gray-100" />
+                  ) : (
+                    team?.shieldUrl ? <img src={team.shieldUrl} alt={team.name} className="w-20 h-24 rounded-xl object-cover border bg-white shadow-md" referrerPolicy="no-referrer" /> : <div className="w-20 h-24 rounded-xl bg-gray-100" />
+                  )}
+                </div>
+              </div>
+
+                <div className="flex gap-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger className="h-10 w-10 rounded-xl hover:bg-gray-100 flex items-center justify-center outline-none">
+                      <MoreVertical size={18} className="text-gray-500" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56 rounded-xl">
+                      <DropdownMenuItem onClick={() => setSelectedMatchForDetails(match)} className="gap-2 cursor-pointer">
+                        <Eye size={16} className="text-gray-500" />
+                        <span>Ver Detalles</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate(`/matches/${match.id}/stats`)} className="gap-2 cursor-pointer">
+                        <ClipboardList size={16} className="text-gray-500" />
+                        <span>Convocatoria y Estadísticas</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={(e) => handleLineupClick(e, match.id, !!associatedLineup)} className="gap-2 cursor-pointer">
+                        <LayoutGrid size={16} className={associatedLineup ? "text-emerald-600" : "text-gray-500"} />
+                        <span className={associatedLineup ? "text-emerald-600 font-medium" : ""}>
+                          {associatedLineup ? "Ver Alineación" : "Crear Alineación"}
+                        </span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => navigate(`/matches/${match.id}/edit`)} className="gap-2 cursor-pointer">
+                        <Pencil size={16} className="text-gray-500" />
+                        <span>Editar Partido</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setMatchToDelete(match)} className="gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50">
+                        <Trash2 size={16} />
+                        <span>Eliminar Partido</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <TooltipProvider>
@@ -408,9 +637,9 @@ export default function MatchList({
             >
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 pt-1 pb-2">
                 {upcomingMatches.map((match, index) => {
-                  const opponent = opponents.find(o => o.id === match.opponentId);
-                  const field = fields.find(f => f.id === match.fieldId);
-                  const date = new Date(match.date);
+                  const opponent = opponentById.get(match.opponentId);
+                  const field = match.fieldId ? fieldById.get(match.fieldId) : undefined;
+                  const rivalName = getOpponentName(opponentById, match.opponentId, 'Rival');
                   
                   return (
                     <motion.div
@@ -436,10 +665,10 @@ export default function MatchList({
                                   {match.type === 'league' ? 'Liga' : match.type === 'cup' ? 'Copa' : 'Amistoso'}
                                 </Badge>
                                 {(() => {
-                                  const season = seasons.find(s => s.id === match.seasonId);
-                                  return season?.division && (
+                                  const division = seasonById.get(match.seasonId)?.division;
+                                  return division && (
                                     <span className="text-[8px] font-black text-emerald-600 uppercase tracking-widest mt-1">
-                                      {season.division}
+                                      {division}
                                     </span>
                                   );
                                 })()}
@@ -458,10 +687,10 @@ export default function MatchList({
                                 )}
                               </div>
                               <div className="min-w-0">
-                                <h4 className="font-bold text-gray-900 truncate group-hover:text-emerald-700 transition-colors">{opponent?.name || 'Rival'}</h4>
+                                <h4 className="font-bold text-gray-900 truncate group-hover:text-emerald-700 transition-colors">{rivalName}</h4>
                                 <p className="text-[11px] text-gray-500 flex items-center gap-1 font-medium">
                                   <Calendar size={12} className="text-emerald-500" />
-                                  {format(date, 'd MMM, HH:mm', { locale: es })}
+                                  {formatMatchDate(match, 'listDayMonthCommaTime')}
                                 </p>
                               </div>
                             </div>
@@ -491,12 +720,12 @@ export default function MatchList({
           {/* Filtro de Rival */}
           <div className="flex-1 min-w-[150px]">
             <Label className="text-[10px] uppercase font-bold text-gray-400 ml-1">Rival</Label>
-            <Select value={filterOpponent} onValueChange={setFilterOpponent}>
+            <Select value={filterOpponent} onValueChange={(v) => startTransition(() => setFilterOpponent(v))}>
               <SelectTrigger className="border-none bg-gray-50 rounded-xl h-10 mt-1">
                 <SelectValue>
                   {filterOpponent === 'all' 
                     ? 'Todos los rivales' 
-                    : opponents.find(o => o.id === filterOpponent)?.name || <span className="text-gray-400">Todos los rivales</span>}
+                    : getOpponentName(opponentById, filterOpponent, 'Todos los rivales')}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
@@ -509,7 +738,7 @@ export default function MatchList({
           {/* Filtro de Mes */}
           <div className="flex-1 min-w-[150px]">
             <Label className="text-[10px] uppercase font-bold text-gray-400 ml-1">Mes</Label>
-            <Select value={filterMonth} onValueChange={setFilterMonth}>
+            <Select value={filterMonth} onValueChange={(v) => startTransition(() => setFilterMonth(v))}>
               <SelectTrigger className="border-none bg-gray-50 rounded-xl h-10 mt-1">
                 <SelectValue>
                   {filterMonth === 'all' 
@@ -527,7 +756,7 @@ export default function MatchList({
           {/* Filtro de Año */}
           <div className="flex-1 min-w-[150px]">
             <Label className="text-[10px] uppercase font-bold text-gray-400 ml-1">Año</Label>
-            <Select value={filterYear} onValueChange={setFilterYear}>
+            <Select value={filterYear} onValueChange={(v) => startTransition(() => setFilterYear(v))}>
               <SelectTrigger className="border-none bg-gray-50 rounded-xl h-10 mt-1">
                 <SelectValue>
                   {filterYear === 'all' 
@@ -545,7 +774,7 @@ export default function MatchList({
           {/* Filtro de Tipo */}
           <div className="flex-1 min-w-[150px]">
             <Label className="text-[10px] uppercase font-bold text-gray-400 ml-1">Tipo</Label>
-            <Select value={filterType} onValueChange={setFilterType}>
+            <Select value={filterType} onValueChange={(v) => startTransition(() => setFilterType(v))}>
               <SelectTrigger className="border-none bg-gray-50 rounded-xl h-10 mt-1">
                 <SelectValue>
                   {filterType === 'all' ? 'Todos los tipos' :
@@ -567,7 +796,7 @@ export default function MatchList({
           {/* Filtro de Estado */}
           <div className="flex-1 min-w-[150px]">
             <Label className="text-[10px] uppercase font-bold text-gray-400 ml-1">Estado</Label>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <Select value={filterStatus} onValueChange={(v) => startTransition(() => setFilterStatus(v))}>
               <SelectTrigger className="border-none bg-gray-50 rounded-xl h-10 mt-1">
                 <SelectValue>
                   {filterStatus === 'all' ? 'Todos' :
@@ -635,197 +864,47 @@ export default function MatchList({
       {/* Match List */}
       <div className="space-y-4">
         {viewMode === 'list' ? (
-          filteredMatches.map((match, i) => {
-            const opponent = opponents.find(o => o.id === match.opponentId);
-            const season = seasons.find(s => s.id === match.seasonId);
-            const isCompleted = match.status === 'completed';
-            const isWin = isCompleted && (match.scoreTeam || 0) > (match.scoreOpponent || 0);
-            const isLoss = isCompleted && (match.scoreTeam || 0) < (match.scoreOpponent || 0);
-            const associatedLineup = lineups.find(l => l.matchId === match.id);
-
-            return (
+          listVirtualActive ? (
+            <div
+              ref={listScrollParentRef}
+              className="max-h-[min(72dvh,920px)] min-h-[200px] overflow-y-auto overflow-x-hidden rounded-2xl border border-gray-100/80 bg-gray-50/20"
+            >
+              <div
+                className="relative w-full"
+                style={{ height: listVirtualizer.getTotalSize() }}
+              >
+                {listVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const match = deferredFilteredMatches[virtualRow.index];
+                  return (
+                    <div
+                      key={match.id}
+                      data-index={virtualRow.index}
+                      ref={listVirtualizer.measureElement}
+                      className="absolute left-0 top-0 w-full box-border"
+                      style={{ transform: `translateY(${virtualRow.start}px)` }}
+                    >
+                      {renderListMatchRow(match)}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            deferredFilteredMatches.map((match, i) => (
               <motion.div
                 key={match.id}
-                initial={{ opacity: 0, x: -20 }}
+                initial={listStaggerEnabled ? { opacity: 0, x: -20 } : false}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05 }}
+                transition={
+                  listStaggerEnabled
+                    ? { duration: 0.2, delay: Math.min(i, 12) * 0.04 }
+                    : { duration: 0.12 }
+                }
               >
-                <Card className="border-none shadow-sm hover:shadow-md transition-all overflow-hidden rounded-2xl group">
-                  <CardContent className="p-0">
-                    <div className="flex flex-col sm:flex-row items-center">
-                      {/* Status Indicator */}
-                      <div className={cn(
-                        "w-full sm:w-2 h-2 sm:h-auto self-stretch",
-                        !isCompleted ? "bg-blue-400" : isWin ? "bg-emerald-500" : isLoss ? "bg-red-500" : "bg-gray-400"
-                      )} />
-                      
-                      <div className="flex-1 p-4 flex flex-col sm:flex-row items-center gap-4 w-full">
-                        <div className="text-center sm:text-left min-w-[120px] flex flex-col justify-center">
-                          <div className="mb-2 flex flex-wrap gap-1 justify-center sm:justify-start">
-                            {match.type === 'league' && <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 border-none">Liga {match.round ? `- ${match.round}` : ''}</Badge>}
-                            {match.type === 'cup' && <Badge variant="secondary" className="bg-purple-50 text-purple-700 hover:bg-purple-100 border-none">Copa {match.round ? `- ${match.round}` : ''}</Badge>}
-                            {(!match.type || match.type === 'friendly') && <Badge variant="secondary" className="bg-orange-50 text-orange-700 hover:bg-orange-100 border-none">Amistoso</Badge>}
-                            {season && (
-                              <Badge variant="outline" className="text-gray-500 border-gray-200">
-                                {season.name} {season.division && `(${season.division})`}
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex items-center justify-center sm:justify-start gap-2 mb-2 sm:hidden">
-                            <p className="text-sm font-black truncate max-w-[250px]">
-                              {match.isHome !== false ? (team?.name || 'MI EQUIPO') : (opponent?.name || 'RIVAL')} 
-                              <span className="mx-2 text-gray-300 font-normal">vs</span>
-                              {match.isHome !== false ? (opponent?.name || 'RIVAL') : (team?.name || 'MI EQUIPO')}
-                            </p>
-                          </div>
-                          <div className="flex items-center justify-center sm:justify-start gap-2 text-gray-500">
-                            <div className="text-center">
-                              <p className="text-xs font-bold uppercase tracking-wider">
-                                {format(new Date(match.date), 'EEEE', { locale: es })}
-                              </p>
-                              <p className="text-lg font-bold text-[#141414]">
-                                {format(new Date(match.date), 'dd MMM', { locale: es })}
-                              </p>
-                            </div>
-                            <div className="h-8 w-px bg-gray-200 mx-2 hidden sm:block"></div>
-                            <div className="text-left hidden sm:block">
-                              <p className="text-xs flex items-center gap-1.5 font-medium">
-                                <Clock size={12} /> {format(new Date(match.date), 'HH:mm')}
-                              </p>
-                              {(match.fieldId || match.location) && (
-                                <div className="text-xs flex items-center gap-1.5 mt-0.5">
-                                  <MapPin size={12} className="text-emerald-600" /> 
-                                  {match.fieldId ? (
-                                    (() => {
-                                      const field = fields.find(f => f.id === match.fieldId);
-                                      return field?.location ? (
-                                        <a 
-                                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(field.location)}`}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="hover:text-emerald-600 transition-colors truncate max-w-[120px]"
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          {field.name}
-                                        </a>
-                                      ) : (
-                                        <span className="truncate max-w-[120px]">{field?.name || 'Campo desconocido'}</span>
-                                      );
-                                    })()
-                                  ) : (
-                                    <span className="truncate max-w-[120px]">{match.location}</span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex-1 flex items-center justify-center gap-4 sm:gap-8 w-full">
-                          {/* Home Team */}
-                            <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
-                              <span className="text-xl font-black truncate w-full text-center">
-                                {match.isHome !== false ? (team?.name || 'MI EQUIPO') : (opponent?.name || 'RIVAL')}
-                              </span>
-                              {match.isHome !== false ? (
-                                team?.shieldUrl ? <img src={team.shieldUrl} alt={team.name} className="w-20 h-24 rounded-xl object-cover border bg-white shadow-md" referrerPolicy="no-referrer" /> : <div className="w-20 h-24 rounded-xl bg-gray-100" />
-                              ) : (
-                                opponent?.shieldUrl ? <img src={opponent.shieldUrl} alt={opponent.name} className="w-20 h-24 rounded-xl object-cover border bg-white shadow-md" referrerPolicy="no-referrer" /> : <div className="w-20 h-24 rounded-xl bg-gray-100" />
-                              )}
-                            </div>
-
-                          <div className="flex flex-col items-center gap-2">
-                            {isCompleted && (
-                              <Badge className={cn(
-                                "text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border shadow-none",
-                                isWin ? "bg-emerald-500 text-white border-emerald-400" :
-                                isLoss ? "bg-red-500 text-white border-red-400" :
-                                "bg-gray-400 text-white border-gray-300"
-                              )}>
-                                {isWin ? 'Victoria' : isLoss ? 'Derrota' : 'Empate'}
-                              </Badge>
-                            )}
-                            <div className="flex items-center gap-4">
-                              {isCompleted ? (
-                                <div className="flex items-center gap-3">
-                                  <div className={cn(
-                                    "text-4xl font-black w-14 h-14 flex items-center justify-center rounded-2xl shadow-sm border-2",
-                                    isWin ? "bg-emerald-50 border-emerald-200 text-emerald-600" :
-                                    isLoss ? "bg-red-50 border-red-200 text-red-600" :
-                                    "bg-gray-50 border-gray-200 text-gray-500"
-                                  )}>
-                                    {match.isHome !== false ? match.scoreTeam : match.scoreOpponent}
-                                  </div>
-                                  <span className="text-gray-300 font-bold text-2xl">-</span>
-                                  <div className={cn(
-                                    "text-4xl font-black w-14 h-14 flex items-center justify-center rounded-2xl shadow-sm border-2",
-                                    isWin ? "bg-emerald-50 border-emerald-200 text-emerald-600" :
-                                    isLoss ? "bg-red-50 border-red-200 text-red-600" :
-                                    "bg-gray-50 border-gray-200 text-gray-500"
-                                  )}>
-                                    {match.isHome !== false ? match.scoreOpponent : match.scoreTeam}
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="px-6 py-2 bg-blue-50 text-blue-600 rounded-xl font-bold flex items-center gap-2">
-                                  <Clock size={16} />
-                                  PENDIENTE
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Away Team */}
-                          <div className="flex-1 flex flex-col items-center gap-2 hidden sm:flex">
-                            <span className="text-xl font-black truncate w-full text-center">
-                              {match.isHome !== false ? (opponent?.name || 'RIVAL') : (team?.name || 'MI EQUIPO')}
-                            </span>
-                            {match.isHome !== false ? (
-                              opponent?.shieldUrl ? <img src={opponent.shieldUrl} alt={opponent.name} className="w-20 h-24 rounded-xl object-cover border bg-white shadow-md" referrerPolicy="no-referrer" /> : <div className="w-20 h-24 rounded-xl bg-gray-100" />
-                            ) : (
-                              team?.shieldUrl ? <img src={team.shieldUrl} alt={team.name} className="w-20 h-24 rounded-xl object-cover border bg-white shadow-md" referrerPolicy="no-referrer" /> : <div className="w-20 h-24 rounded-xl bg-gray-100" />
-                            )}
-                          </div>
-                        </div>
-
-                          <div className="flex gap-2">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger className="h-10 w-10 rounded-xl hover:bg-gray-100 flex items-center justify-center outline-none">
-                                <MoreVertical size={18} className="text-gray-500" />
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-56 rounded-xl">
-                                <DropdownMenuItem onClick={() => setSelectedMatchForDetails(match)} className="gap-2 cursor-pointer">
-                                  <Eye size={16} className="text-gray-500" />
-                                  <span>Ver Detalles</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => navigate(`/matches/${match.id}/stats`)} className="gap-2 cursor-pointer">
-                                  <ClipboardList size={16} className="text-gray-500" />
-                                  <span>Convocatoria y Estadísticas</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={(e) => handleLineupClick(e, match.id, !!associatedLineup)} className="gap-2 cursor-pointer">
-                                  <LayoutGrid size={16} className={associatedLineup ? "text-emerald-600" : "text-gray-500"} />
-                                  <span className={associatedLineup ? "text-emerald-600 font-medium" : ""}>
-                                    {associatedLineup ? "Ver Alineación" : "Crear Alineación"}
-                                  </span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => navigate(`/matches/${match.id}/edit`)} className="gap-2 cursor-pointer">
-                                  <Pencil size={16} className="text-gray-500" />
-                                  <span>Editar Partido</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setMatchToDelete(match)} className="gap-2 cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50">
-                                  <Trash2 size={16} />
-                                  <span>Eliminar Partido</span>
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                {renderListMatchRow(match)}
               </motion.div>
-            );
-          })
+            ))
+          )
         ) : viewMode === 'compact' ? (
           <div className="space-y-4">
             {Object.entries(matchesByMonth).map(([monthYear, monthMatches]) => (
@@ -839,11 +918,12 @@ export default function MatchList({
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2">
                   {monthMatches.map((match) => {
-                    const opponent = opponents.find(o => o.id === match.opponentId);
+                    const opponent = opponentById.get(match.opponentId);
+                    const rivalName = getOpponentName(opponentById, match.opponentId, 'RIVAL');
                     const isCompleted = match.status === 'completed';
                     const isWin = isCompleted && (match.scoreTeam || 0) > (match.scoreOpponent || 0);
                     const isLoss = isCompleted && (match.scoreTeam || 0) < (match.scoreOpponent || 0);
-                    const associatedLineup = lineups.find(l => l.matchId === match.id);
+                    const associatedLineup = lineupByMatchId.get(match.id);
 
                     return (
                       <Card 
@@ -866,10 +946,10 @@ export default function MatchList({
                                 : "bg-blue-600 border-blue-500 text-white"
                             )}>
                               <span className="text-[9px] font-black uppercase leading-none mb-0.5">
-                                {format(new Date(match.date), 'EEE', { locale: es })}
+                                {formatMatchDate(match, 'listWeekdayShort')}
                               </span>
                               <span className="text-lg font-black leading-none">
-                                {format(new Date(match.date), 'dd')}
+                                {formatMatchDate(match, 'listDayOfMonthPadded')}
                               </span>
                             </div>
 
@@ -899,7 +979,7 @@ export default function MatchList({
                                     opponent?.shieldUrl ? <img src={opponent.shieldUrl} className="w-5 h-6 object-contain shrink-0" referrerPolicy="no-referrer" /> : <Shield size={12} className="text-gray-400 shrink-0" />
                                   )}
                                   <span className="text-xs font-bold text-gray-900 truncate">
-                                    {match.isHome !== false ? (team?.name || 'MI EQUIPO') : (opponent?.name || 'RIVAL')}
+                                    {match.isHome !== false ? (team?.name || 'MI EQUIPO') : rivalName}
                                   </span>
                                 </div>
                                 {isCompleted && (
@@ -920,7 +1000,7 @@ export default function MatchList({
                                     team?.shieldUrl ? <img src={team.shieldUrl} className="w-5 h-6 object-contain shrink-0" referrerPolicy="no-referrer" /> : <Shield size={12} className="text-gray-400 shrink-0" />
                                   )}
                                   <span className="text-xs font-bold text-gray-900 truncate">
-                                    {match.isHome !== false ? (opponent?.name || 'RIVAL') : (team?.name || 'MI EQUIPO')}
+                                    {match.isHome !== false ? rivalName : (team?.name || 'MI EQUIPO')}
                                   </span>
                                 </div>
                                 {isCompleted ? (
@@ -983,7 +1063,7 @@ export default function MatchList({
             <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
               <div className="flex items-center gap-4">
                 <h3 className="text-xl font-black text-gray-900 capitalize">
-                  {format(currentCalendarDate, 'MMMM yyyy', { locale: es })}
+                  {formatDatePreset(currentCalendarDate, 'calendarMonthYear')}
                 </h3>
                 <div className="flex items-center bg-white rounded-xl border border-gray-200 p-1">
                   <Button variant="ghost" size="icon" onClick={prevMonth} className="h-7 w-7 rounded-lg">
@@ -1039,13 +1119,14 @@ export default function MatchList({
                         isTodayDate ? "bg-emerald-600 text-white shadow-sm" : 
                         isCurrentMonth ? "text-gray-900" : "text-gray-300"
                       )}>
-                        {format(day, 'd')}
+                        {formatDatePreset(day, 'listDayOfMonth')}
                       </span>
                     </div>
 
                     <div className="space-y-1 overflow-y-auto max-h-[60px] scrollbar-hide">
                       {dayMatches.map(match => {
-                        const opponent = opponents.find(o => o.id === match.opponentId);
+                        const opponent = opponentById.get(match.opponentId);
+                        const rivalName = getOpponentName(opponentById, match.opponentId, 'Rival');
                         const isCompleted = match.status === 'completed';
                         const isWin = isCompleted && (match.scoreTeam || 0) > (match.scoreOpponent || 0);
                         const isLoss = isCompleted && (match.scoreTeam || 0) < (match.scoreOpponent || 0);
@@ -1067,7 +1148,7 @@ export default function MatchList({
                                   !isCompleted ? "bg-blue-400" : isWin ? "bg-emerald-500" : isLoss ? "bg-red-500" : "bg-gray-400"
                                 )} />
                                 <span className="truncate">
-                                  {match.isHome !== false ? 'vs ' : '@ '}{opponent?.name || 'Rival'}
+                                  {match.isHome !== false ? 'vs ' : '@ '}{rivalName}
                                 </span>
                                 {isCompleted && (
                                   <span className={cn(
@@ -1081,12 +1162,12 @@ export default function MatchList({
                             </TooltipTrigger>
                             <TooltipContent className="p-3 rounded-xl border-none shadow-xl bg-gray-900 text-white">
                               <div className="space-y-1">
-                                <p className="font-bold text-xs">{opponent?.name || 'Rival'}</p>
+                                <p className="font-bold text-xs">{rivalName}</p>
                                 <p className="text-[10px] text-gray-400">
-                                  {format(new Date(match.date), 'HH:mm')} • {match.type === 'league' ? 'Liga' : match.type === 'cup' ? 'Copa' : 'Amistoso'}
+                                  {formatMatchDate(match, 'listTime')} • {match.type === 'league' ? 'Liga' : match.type === 'cup' ? 'Copa' : 'Amistoso'}
                                   {(() => {
-                                    const season = seasons.find(s => s.id === match.seasonId);
-                                    return season?.division ? ` • ${season.division}` : '';
+                                    const division = seasonById.get(match.seasonId)?.division;
+                                    return division ? ` • ${division}` : '';
                                   })()}
                                 </p>
                               {isCompleted && (
@@ -1110,10 +1191,12 @@ export default function MatchList({
           </div>
         )}
         {filteredMatches.length === 0 && (
-          <div className="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-gray-100">
-            <Calendar className="mx-auto text-gray-200 mb-4" size={48} />
-            <p className="text-gray-400 font-medium">No se encontraron partidos con estos filtros.</p>
-          </div>
+          <EmptyStateCard
+            icon={Calendar}
+            title="No se encontraron partidos"
+            description="Prueba a relajar los filtros o programa un nuevo encuentro para esta temporada."
+            primaryAction={{ label: 'Programar partido', to: '/matches/new' }}
+          />
         )}
       </div>
       {/* Instagram Share Modal */}
@@ -1158,22 +1241,27 @@ export default function MatchList({
                     </div>
                     <div className="text-right">
                       <p className="text-2xl font-black text-white/90 uppercase">{months.find(m => m.value === filterMonth)?.label}</p>
-                      <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Temporada {seasons.find(s => s.id === globalSeasonId)?.name || '23/24'}</p>
+                      <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">
+                        Temporada{' '}
+                        {globalSeasonId === 'all'
+                          ? '23/24'
+                          : getSeasonName(seasonById, globalSeasonId, { missingLabel: '23/24' })}
+                      </p>
                     </div>
                   </div>
 
                   <div className="flex-1 space-y-3 overflow-hidden">
                     {filteredMatches.slice(0, 5).map((m) => {
-                      const opp = opponents.find(o => o.id === m.opponentId);
+                      const rivalName = getOpponentName(opponentById, m.opponentId, 'RIVAL');
                       return (
                         <div key={m.id} className="bg-white/5 backdrop-blur-sm border border-white/5 p-2 rounded-xl flex items-center gap-3">
                           <div className="flex flex-col items-center min-w-[30px] border-r border-white/10 pr-2">
-                            <span className="text-sm font-black leading-none">{format(new Date(m.date), 'dd')}</span>
-                            <span className="text-[6px] font-bold uppercase text-emerald-400">{format(new Date(m.date), 'EEE', { locale: es })}</span>
+                            <span className="text-sm font-black leading-none">{formatMatchDate(m, 'listDayOfMonthPadded')}</span>
+                            <span className="text-[6px] font-bold uppercase text-emerald-400">{formatMatchDate(m, 'listWeekdayShort')}</span>
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-[10px] font-black truncate uppercase leading-tight">
-                              {m.isHome !== false ? 'vs ' : '@ '}{opp?.name || 'RIVAL'}
+                              {m.isHome !== false ? 'vs ' : '@ '}{rivalName}
                             </p>
                             <div className="flex items-center gap-1 mt-0.5">
                               <Badge className="text-[6px] h-2.5 px-1 bg-emerald-500/20 text-emerald-300 border-none font-black uppercase">
@@ -1184,7 +1272,7 @@ export default function MatchList({
                                   <MapPin size={6} className="text-emerald-400" /> 
                                   {m.fieldId ? (
                                     (() => {
-                                      const field = fields.find(f => f.id === m.fieldId);
+                                      const field = m.fieldId ? fieldById.get(m.fieldId) : undefined;
                                       return field?.name || 'Campo desconocido';
                                     })()
                                   ) : (
@@ -1195,7 +1283,7 @@ export default function MatchList({
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="text-[9px] font-black">{format(new Date(m.date), 'HH:mm')}</p>
+                            <p className="text-[9px] font-black">{formatMatchDate(m, 'listTime')}</p>
                           </div>
                         </div>
                       );
@@ -1260,18 +1348,19 @@ export default function MatchList({
             </DialogTitle>
             <DialogDescription>
               {matchToDelete && (() => {
-                const opp = opponents.find(o => o.id === matchToDelete.opponentId);
-                const season = seasons.find(s => s.id === matchToDelete.seasonId);
+                const seasonName = getSeasonName(seasonById, matchToDelete.seasonId, { missingLabel: '' });
                 return (
                   <>
                     <span className="block mt-1">
                       Vas a eliminar el partido contra{' '}
-                      <span className="font-bold text-gray-900">{opp?.name || 'Rival'}</span>
+                      <span className="font-bold text-gray-900">
+                        {getOpponentName(opponentById, matchToDelete.opponentId, 'Rival')}
+                      </span>
                       {' '}del{' '}
                       <span className="font-bold text-gray-900">
-                        {format(new Date(matchToDelete.date), "d 'de' MMMM yyyy", { locale: es })}
+                        {formatDatePreset(matchToDelete.date, 'deleteDialogDate')}
                       </span>
-                      {season && <> ({season.name})</>}.
+                      {seasonName ? ` (${seasonName})` : ''}.
                     </span>
                     <span className="block mt-2 text-red-600 font-medium">
                       Se borrarán también las estadísticas y convocatoria asociadas. Esta acción no se puede deshacer.
@@ -1321,9 +1410,10 @@ export default function MatchList({
         <DialogContent className="sm:max-w-5xl rounded-3xl border-none shadow-2xl p-0 overflow-hidden bg-white max-h-[95vh] flex flex-col">
           {selectedMatchForDetails && (() => {
             const match = selectedMatchForDetails;
-            const opponent = opponents.find(o => o.id === match.opponentId);
-            const field = fields.find(f => f.id === match.fieldId);
-            const season = seasons.find(s => s.id === match.seasonId);
+            const opponent = opponentById.get(match.opponentId);
+            const rivalName = getOpponentName(opponentById, match.opponentId, 'RIVAL');
+            const field = match.fieldId ? fieldById.get(match.fieldId) : undefined;
+            const season = seasonById.get(match.seasonId);
             const isCompleted = match.status === 'completed';
             const isWin = isCompleted && (match.scoreTeam || 0) > (match.scoreOpponent || 0);
             const isLoss = isCompleted && (match.scoreTeam || 0) < (match.scoreOpponent || 0);
@@ -1379,7 +1469,7 @@ export default function MatchList({
                       {/* Home */}
                       <div className="flex-1 flex flex-col items-center gap-2">
                         <span className="text-lg font-black text-center leading-tight min-h-[2.5rem] flex items-center">
-                          {match.isHome !== false ? (team?.name || 'MI EQUIPO') : (opponent?.name || 'RIVAL')}
+                          {match.isHome !== false ? (team?.name || 'MI EQUIPO') : rivalName}
                         </span>
                         {match.isHome !== false ? (
                           team?.shieldUrl ? <img src={team.shieldUrl} alt={team.name} className="w-16 h-20 rounded-xl object-cover border-2 border-white/20 bg-white shadow-xl" referrerPolicy="no-referrer" /> : <div className="w-16 h-20 rounded-xl bg-white/10 border-2 border-dashed border-white/20" />
@@ -1420,15 +1510,15 @@ export default function MatchList({
                           </div>
                         )}
                         <div className="flex flex-col items-center text-emerald-400 font-bold text-[10px] uppercase tracking-widest">
-                          <span>{format(new Date(match.date), 'dd MMM yyyy', { locale: es })}</span>
-                          <span>{format(new Date(match.date), 'HH:mm')}</span>
+                          <span>{formatMatchDate(match, 'listMedium')}</span>
+                          <span>{formatMatchDate(match, 'listTime')}</span>
                         </div>
                       </div>
 
                       {/* Away */}
                       <div className="flex-1 flex flex-col items-center gap-2">
                         <span className="text-lg font-black text-center leading-tight min-h-[2.5rem] flex items-center">
-                          {match.isHome !== false ? (opponent?.name || 'RIVAL') : (team?.name || 'MI EQUIPO')}
+                          {match.isHome !== false ? rivalName : (team?.name || 'MI EQUIPO')}
                         </span>
                         {match.isHome !== false ? (
                           opponent?.shieldUrl ? <img src={opponent.shieldUrl} alt={opponent.name} className="w-16 h-20 rounded-xl object-cover border-2 border-white/20 bg-white shadow-xl" referrerPolicy="no-referrer" /> : <div className="w-16 h-20 rounded-xl bg-white/10 border-2 border-dashed border-white/20" />
@@ -1527,7 +1617,7 @@ export default function MatchList({
                           {matchStats.length > 0 && (
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-8">
                               {['Portero', 'Defensa', 'Medio', 'Delantero'].map((pos) => {
-                                const posStats = matchStats.filter(s => players.find(p => p.id === s.playerId)?.position === pos);
+                                const posStats = matchStats.filter(s => playerById.get(s.playerId)?.position === pos);
                                 if (posStats.length === 0) return null;
 
                                 return (
@@ -1535,7 +1625,7 @@ export default function MatchList({
                                     <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest px-2 bg-emerald-50 w-fit rounded-md py-0.5">{pos}s</p>
                                     <div className="space-y-2">
                                       {posStats.map(stat => {
-                                        const player = players.find(p => p.id === stat.playerId);
+                                        const player = playerById.get(stat.playerId);
                                         if (!player) return null;
                                         const hasActions = stat.goals > 0 || stat.assists > 0 || stat.yellowCards > 0 || stat.redCards > 0;
 
@@ -1572,7 +1662,7 @@ export default function MatchList({
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 {justifiedStats.map(stat => {
-                                  const player = players.find(p => p.id === stat.playerId);
+                                  const player = playerById.get(stat.playerId);
                                   if (!player) return null;
                                   return (
                                     <Badge key={stat.id} variant="secondary" className="bg-blue-50 text-blue-700 border-blue-100 px-3 py-1 rounded-lg flex items-center gap-2">
@@ -1593,7 +1683,7 @@ export default function MatchList({
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 {notAttendingStats.map(stat => {
-                                  const player = players.find(p => p.id === stat.playerId);
+                                  const player = playerById.get(stat.playerId);
                                   if (!player) return null;
                                   return (
                                     <Badge key={stat.id} variant="secondary" className="bg-red-50 text-red-700 border-red-100 px-3 py-1 rounded-lg flex items-center gap-2">
@@ -1614,7 +1704,7 @@ export default function MatchList({
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 {doubtfulStats.map(stat => {
-                                  const player = players.find(p => p.id === stat.playerId);
+                                  const player = playerById.get(stat.playerId);
                                   if (!player) return null;
                                   return (
                                     <Badge key={stat.id} variant="secondary" className="bg-amber-50 text-amber-700 border-amber-100 px-3 py-1 rounded-lg flex items-center gap-2">

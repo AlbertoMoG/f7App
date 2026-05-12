@@ -5,8 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { formatMatchDate, getOpponentName } from '@/lib/matchDisplayLabel';
 import { Users, Shield, Calendar, ExternalLink, Plus, Info } from 'lucide-react';
 import { GRADE_COLORS } from '../../../lib/predictionConstants';
 import {
@@ -198,7 +197,8 @@ export const SquadsTab = React.memo(function SquadsTab({
               {analyzedMatches.map((match) => {
                 const analysis = squadAnalysis.get(match.id);
                 if (!analysis) return null;
-                const opponent = opponents.find(o => o.id === match.opponentId);
+                const opponentName = getOpponentName(opponents, match.opponentId, 'Rival');
+                const opponent = opponents.find((o) => o.id === match.opponentId);
 
                 return (
                   <tr 
@@ -218,16 +218,16 @@ export const SquadsTab = React.memo(function SquadsTab({
                       <div className="flex items-center gap-2">
                          <div className="w-7 h-7 bg-gray-50 rounded-lg flex items-center justify-center overflow-hidden border border-gray-100">
                            {opponent?.shieldUrl ? (
-                             <img src={opponent.shieldUrl} alt={opponent.name} className="w-full h-full object-contain p-1" referrerPolicy="no-referrer" />
+                             <img src={opponent.shieldUrl} alt={opponentName} className="w-full h-full object-contain p-1" referrerPolicy="no-referrer" />
                            ) : (
                              <Shield size={14} className="text-gray-300" />
                            )}
                          </div>
-                         <span className="font-bold text-gray-900 truncate">{opponent?.name || 'Rival'}</span>
+                         <span className="font-bold text-gray-900 truncate">{opponentName}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-[10px] font-medium text-gray-500">{format(new Date(match.date), 'dd/MM/yy')}</span>
+                      <span className="text-[10px] font-medium text-gray-500">{formatMatchDate(match, 'listCompact')}</span>
                     </td>
                     <td className="px-4 py-3 text-center">
                       <span className="text-xs font-black text-gray-700">{analysis.attendingCount}</span>
@@ -267,6 +267,7 @@ export const SquadsTab = React.memo(function SquadsTab({
               const analysis = squadAnalysis.get(match.id);
               if (!analysis) return null;
               const opponent = opponents.find(o => o.id === match.opponentId);
+              const opponentName = getOpponentName(opponents, match.opponentId, 'Rival');
 
               return (
                 <div 
@@ -309,15 +310,15 @@ export const SquadsTab = React.memo(function SquadsTab({
                    <div className="flex items-center gap-3 mb-4">
                      <div className="w-12 h-12 bg-gray-50 rounded-xl flex items-center justify-center overflow-hidden border border-gray-100 shrink-0">
                        {opponent?.shieldUrl ? (
-                         <img src={opponent.shieldUrl} alt={opponent.name} className="w-full h-full object-contain p-2" referrerPolicy="no-referrer" />
+                         <img src={opponent.shieldUrl} alt={opponentName} className="w-full h-full object-contain p-2" referrerPolicy="no-referrer" />
                        ) : (
                          <Shield size={24} className="text-gray-300" />
                        )}
                      </div>
                      <div className="min-w-0 flex-1">
-                       <p className="font-bold text-gray-900 truncate pr-16">{opponent?.name || 'Rival'}</p>
+                       <p className="font-bold text-gray-900 truncate pr-16">{opponentName}</p>
                        <p className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
-                         <Calendar size={10} /> {format(new Date(match.date), 'dd MMM yyyy', { locale: es })}
+                         <Calendar size={10} /> {formatMatchDate(match, 'listMedium')}
                        </p>
                      </div>
                    </div>

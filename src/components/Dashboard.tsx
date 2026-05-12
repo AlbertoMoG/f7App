@@ -26,8 +26,6 @@ import {
   Brain,
   Timer
 } from 'lucide-react';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
@@ -66,6 +64,7 @@ import { seedDatabase } from '../lib/seedData';
 import { cleanupDatabase } from '../lib/cleanup';
 import { toast } from 'sonner';
 import { calculatePlayerRating } from '../lib/ratingSystem';
+import { formatMatchDate, getOpponentName } from '@/lib/matchDisplayLabel';
 import { LazyTopPlayersCard } from './LazyTopPlayersCard';
 import AttendanceChart from './AttendanceChart';
 
@@ -318,14 +317,13 @@ export default function Dashboard({
 
   const last5Matches = React.useMemo(() => {
     return matchesWithScores.slice(-5).map(m => {
-        const opponent = opponents.find(o => o.id === m.opponentId);
         const isWin = m.scoreTeam! > m.scoreOpponent!;
         const isDraw = m.scoreTeam! === m.scoreOpponent!;
         const isLoss = m.scoreTeam! < m.scoreOpponent!;
         return {
             ...m,
-            opponentName: opponent?.name || 'Desconocido',
-            opponentShield: opponent?.shieldUrl,
+            opponentName: getOpponentName(opponents, m.opponentId, 'Desconocido'),
+            opponentShield: opponents.find((o) => o.id === m.opponentId)?.shieldUrl,
             result: isWin ? 'W' : (isDraw ? 'D' : 'L')
         };
     });
@@ -334,20 +332,34 @@ export default function Dashboard({
 
   // 4. Histórico vs Rivales (filtrado)
   const opponentStats = React.useMemo(() => {
-    return opponents.map(opp => {
-      const vsOppMatches = completedMatches.filter(m => m.opponentId === opp.id && m.scoreTeam != null && m.scoreOpponent != null);
-      const vsWins = vsOppMatches.filter(m => m.scoreTeam! > m.scoreOpponent!).length;
-      const vsLosses = vsOppMatches.filter(m => m.scoreTeam! < m.scoreOpponent!).length;
-      const vsDraws = vsOppMatches.filter(m => m.scoreTeam! === m.scoreOpponent!).length;
-
-      return {
-        name: opp.name,
-        wins: vsWins,
-        losses: vsLosses,
-        draws: vsDraws,
-        total: vsOppMatches.length
-      };
-    }).filter(o => o.total > 0).sort((a, b) => b.total - a.total);
+    const byOpp = new Map<string, { wins: number; losses: number; draws: number; total: number }>();
+    for (const m of completedMatches) {
+      if (m.scoreTeam == null || m.scoreOpponent == null) continue;
+      const oid = m.opponentId;
+      let row = byOpp.get(oid);
+      if (!row) {
+        row = { wins: 0, losses: 0, draws: 0, total: 0 };
+        byOpp.set(oid, row);
+      }
+      row.total++;
+      if (m.scoreTeam > m.scoreOpponent) row.wins++;
+      else if (m.scoreTeam < m.scoreOpponent) row.losses++;
+      else row.draws++;
+    }
+    return opponents
+      .map((opp) => {
+        const r = byOpp.get(opp.id);
+        if (!r || r.total === 0) return null;
+        return {
+          name: opp.name,
+          wins: r.wins,
+          losses: r.losses,
+          draws: r.draws,
+          total: r.total,
+        };
+      })
+      .filter((o): o is { name: string; wins: number; losses: number; draws: number; total: number } => o != null)
+      .sort((a, b) => b.total - a.total);
   }, [opponents, completedMatches]);
 
   // 5. Cálculo de Baremo (Nota Final)
@@ -644,7 +656,9 @@ export default function Dashboard({
                       </div>
                       <div>
                         <p className="text-xs font-bold text-emerald-300/60 uppercase tracking-wider mb-0.5">Rival</p>
-                        <p className="font-bold text-lg leading-tight">{nextMatchInfo.opponent?.name || 'Por definir'}</p>
+                        <p className="font-bold text-lg leading-tight">
+                          {getOpponentName(opponents, nextMatchInfo.match.opponentId, 'Por definir')}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -661,13 +675,13 @@ export default function Dashboard({
                     <div className="flex items-center gap-1.5 text-emerald-200">
                       <Calendar size={14} className="text-emerald-400" />
                       <span className="text-sm font-semibold">
-                        {format(new Date(nextMatchInfo.match.date), 'd MMM, yyyy', { locale: es })}
+                        {formatMatchDate(nextMatchInfo.match, 'dashboardDate')}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 text-emerald-200">
                       <Clock size={14} className="text-emerald-400" />
                       <span className="text-sm font-semibold">
-                        {format(new Date(nextMatchInfo.match.date), 'HH:mm')}
+                        {formatMatchDate(nextMatchInfo.match, 'listTime')}
                       </span>
                     </div>
                   </div>

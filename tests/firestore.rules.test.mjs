@@ -32,6 +32,10 @@ before(async () => {
       name: 'Team One',
       ownerId: OWNER_UID,
     });
+    await setDoc(doc(db, 'team', 'team-2'), {
+      name: 'Team Two',
+      ownerId: OTHER_UID,
+    });
     await setDoc(doc(db, 'players', PLAYER_ID), {
       teamId: TEAM_ID,
       firstName: 'Leo',
@@ -117,6 +121,73 @@ describe('Firestore security rules', () => {
         status: 'completed',
         scoreHome: 3,
         scoreAway: 1,
+      })
+    );
+  });
+
+  it('denies player create without teamId', async () => {
+    const db = testEnv.authenticatedContext(OWNER_UID).firestore();
+    await assertFails(
+      setDoc(doc(db, 'players', 'player-no-team'), {
+        firstName: 'A',
+        lastName: 'B',
+        number: 1,
+        position: 'Medio',
+        birthDate: '2000-01-01',
+      })
+    );
+  });
+
+  it('denies owner moving player to another team they do not own', async () => {
+    const db = testEnv.authenticatedContext(OWNER_UID).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, 'players', PLAYER_ID),
+        {
+          teamId: 'team-2',
+          firstName: 'Leo',
+          lastName: 'Messi',
+          number: 10,
+          position: 'Delantero',
+          birthDate: '1987-06-24',
+        },
+        { merge: true }
+      )
+    );
+  });
+
+  it('denies match with invalid status value', async () => {
+    const db = testEnv.authenticatedContext(OWNER_UID).firestore();
+    await assertFails(
+      setDoc(doc(db, 'matches', 'match-bad-status'), {
+        teamId: TEAM_ID,
+        seasonId: 'season-1',
+        date: '2026-04-28',
+        opponentId: 'opp-1',
+        status: 'finished',
+      })
+    );
+  });
+
+  it('denies opponent create without required name shape', async () => {
+    const db = testEnv.authenticatedContext(OWNER_UID).firestore();
+    await assertFails(
+      setDoc(doc(db, 'opponents', 'opp-bad'), {
+        teamId: TEAM_ID,
+        name: '',
+      })
+    );
+  });
+
+  it('allows scheduled match without scores', async () => {
+    const db = testEnv.authenticatedContext(OWNER_UID).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, 'matches', 'match-scheduled'), {
+        teamId: TEAM_ID,
+        seasonId: 'season-1',
+        date: '2026-05-01',
+        opponentId: 'opp-1',
+        status: 'scheduled',
       })
     );
   });

@@ -22,6 +22,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { EmptyStateCard } from '@/components/EmptyStateCard';
 
 interface FieldManagerProps {
   fields: Field[];
@@ -137,25 +138,12 @@ export default function FieldManager({
       </header>
 
       {fields.length === 0 ? (
-        <Card className="border-dashed border-2 border-gray-200 bg-gray-50/50 shadow-none">
-          <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center mb-4">
-              <Map size={32} className="text-gray-300" />
-            </div>
-            <h3 className="text-xl font-bold text-gray-700 mb-2">No hay campos</h3>
-            <p className="text-gray-500 max-w-sm mb-6">
-              Aún no has añadido ningún campo de fútbol. Añade el primero para poder seleccionarlo en tus partidos.
-            </p>
-            <Button 
-              onClick={() => setIsDialogOpen(true)}
-              variant="outline"
-              className="rounded-xl border-gray-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200"
-            >
-              <Plus size={18} className="mr-2" />
-              Añadir Primer Campo
-            </Button>
-          </CardContent>
-        </Card>
+        <EmptyStateCard
+          icon={Map}
+          title="No hay campos"
+          description="Aún no has añadido ningún campo de fútbol. Añade el primero para poder seleccionarlo en tus partidos."
+          primaryAction={{ label: 'Añadir primer campo', onClick: () => setIsDialogOpen(true) }}
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {fields.map(f => (

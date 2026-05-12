@@ -38,10 +38,10 @@ import {
   DialogDescription
 } from '@/components/ui/dialog';
 import { Player, Match, PlayerStat, Season, Opponent, PlayerSeason } from '../types';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { formatMatchDate, getOpponentName } from '@/lib/matchDisplayLabel';
+import { toOpponentMap } from '@/lib/entityIndex';
 import PlayerCumulativeAttendanceChart from './PlayerCumulativeAttendanceChart';
 
 interface AttendanceTrackerProps {
@@ -83,6 +83,8 @@ export default function AttendanceTracker({
       })
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [matches, globalSeasonId, typeFilter]);
+
+  const opponentById = React.useMemo(() => toOpponentMap(opponents), [opponents]);
 
   // Filtrar jugadores por temporada y búsqueda
   const filteredPlayers = React.useMemo(() => {
@@ -261,14 +263,15 @@ export default function AttendanceTracker({
                       Jugador
                     </th>
                     {seasonMatches.map(match => {
-                      const opponent = opponents.find(o => o.id === match.opponentId);
+                      const opponent = opponentById.get(match.opponentId);
+                      const rivalName = getOpponentName(opponentById, match.opponentId, 'Rival');
                       return (
                         <th key={match.id} className="p-2 text-center min-w-[80px] border-r border-gray-100 last:border-r-0">
                           <Tooltip>
                             <TooltipTrigger render={
                               <div className="flex flex-col items-center gap-0.5 cursor-help">
                                 <span className="text-[9px] font-black text-gray-900 uppercase leading-none">
-                                  {format(new Date(match.date), 'dd/MM')}
+                                  {formatMatchDate(match, 'chartNumeric')}
                                 </span>
                                 {match.round && (
                                   <span className="text-[8px] font-bold text-emerald-600 uppercase leading-none">
@@ -285,8 +288,8 @@ export default function AttendanceTracker({
                               </div>
                             } />
                             <TooltipContent className="p-3 bg-gray-900 text-white rounded-xl border-none shadow-xl">
-                              <p className="font-bold text-xs">{opponent?.name || 'Rival'}</p>
-                              <p className="text-[10px] text-gray-400">{format(new Date(match.date), 'PPPP', { locale: es })}</p>
+                              <p className="font-bold text-xs">{rivalName}</p>
+                              <p className="text-[10px] text-gray-400">{formatMatchDate(match, 'longWeekdayDate')}</p>
                               <div className="flex items-center gap-2 mt-2">
                                 <Badge variant="outline" className="bg-white/10 text-white border-none text-[9px]">
                                   {match.type === 'league' ? 'Liga' : match.type === 'cup' ? 'Copa' : 'Amistoso'}
@@ -396,7 +399,7 @@ export default function AttendanceTracker({
                                         </TooltipTrigger>
                                         <TooltipContent className="text-[10px] font-bold p-2 bg-gray-900 text-white rounded-lg border-none shadow-xl">
                                           <div className="flex flex-col gap-1">
-                                            <p>{player.alias || player.firstName} - {format(new Date(match.date), 'dd/MM')}</p>
+                                            <p>{player.alias || player.firstName} - {formatMatchDate(match, 'chartNumeric')}</p>
                                             <p className="text-emerald-400">{getStatusLabel(status)}</p>
                                             <p className="text-gray-400 text-[8px] italic">Click para cambiar</p>
                                           </div>
@@ -546,7 +549,12 @@ export default function AttendanceTracker({
             <DialogHeader className="mb-4">
               <DialogTitle className="text-lg font-bold text-center">Cambiar Asistencia</DialogTitle>
               <DialogDescription className="text-center text-xs">
-                {editingAttendance && players.find(p => p.id === editingAttendance.playerId)?.alias} - {editingAttendance && format(new Date(matches.find(m => m.id === editingAttendance.matchId)?.date || ''), 'dd/MM')}
+                {editingAttendance && players.find(p => p.id === editingAttendance.playerId)?.alias} -{' '}
+                {editingAttendance &&
+                  (() => {
+                    const m = matches.find((x) => x.id === editingAttendance.matchId);
+                    return m ? formatMatchDate(m, 'chartNumeric') : '—';
+                  })()}
               </DialogDescription>
             </DialogHeader>
             <div className="grid grid-cols-1 gap-2">

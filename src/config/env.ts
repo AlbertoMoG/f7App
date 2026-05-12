@@ -13,7 +13,11 @@ function getRequiredEnv(key: RequiredEnvKey): string {
 }
 
 export const env = {
-  geminiApiKey: import.meta.env.GEMINI_API_KEY ?? '',
+  /**
+   * Optional Gemini key for client-side calls. **Exposed in the built JS** (Vite `VITE_` prefix).
+   * For production, prefer Firebase Callable / backend proxy so the key never ships to browsers.
+   */
+  geminiApiKey: (import.meta.env.VITE_GEMINI_API_KEY as string | undefined) ?? '',
   firebase: {
     apiKey: getRequiredEnv('VITE_FIREBASE_API_KEY'),
     authDomain: getRequiredEnv('VITE_FIREBASE_AUTH_DOMAIN'),

@@ -10,8 +10,7 @@ import {
   ReferenceLine
 } from 'recharts';
 import { Match, PlayerStat } from '../types';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { formatMatchDate } from '@/lib/matchDisplayLabel';
 
 interface PlayerCumulativeAttendanceChartProps {
   playerId: string;
@@ -34,7 +33,7 @@ export default function PlayerCumulativeAttendanceChart({ playerId, matches, sta
       
       return {
         name: `J${match.round || index + 1}`,
-        fullDate: format(new Date(match.date), "dd/MM", { locale: es }),
+        fullDate: formatMatchDate(match, 'chartNumeric'),
         cumulative: cumulative,
         attended: attended,
         theoretical: index + 1 // Perfect regularity (attended all)

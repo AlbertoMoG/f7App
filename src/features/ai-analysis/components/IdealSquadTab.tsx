@@ -1,6 +1,4 @@
 import React from 'react';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +8,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { formatMatchDate, getOpponentName, getSeasonName } from '@/lib/matchDisplayLabel';
 import { Calendar, ExternalLink, Info, LayoutGrid, Sparkles } from 'lucide-react';
 import type { Match, Opponent, PlayerStat, Season, Field } from '../../../types';
 import type { MatchPrediction } from '../../../types/aiAnalysis';
@@ -78,8 +77,8 @@ export const IdealSquadTab = React.memo(function IdealSquadTab({
                 (s) => s.matchId === match.id && s.attendance === 'attending'
               ).length;
               const prediction = predictions.get(match.id);
-              const opponent = opponents.find((o) => o.id === match.opponentId);
-              const season = seasons.find((s) => s.id === match.seasonId);
+              const rivalName = getOpponentName(opponents, match.opponentId, '—');
+              const seasonName = getSeasonName(seasons, match.seasonId, { missingLabel: '' });
               const field = fields?.find((f) => f.id === match.fieldId);
 
               return (
@@ -116,15 +115,15 @@ export const IdealSquadTab = React.memo(function IdealSquadTab({
                       <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider mb-0.5">
                         Rival
                       </p>
-                      <p className="text-sm font-bold text-gray-900 truncate">{opponent?.name ?? '—'}</p>
-                      {season && (
-                        <p className="text-[10px] text-gray-500 mt-0.5">{season.name}</p>
-                      )}
+                      <p className="text-sm font-bold text-gray-900 truncate">{rivalName}</p>
+                      {seasonName ? (
+                        <p className="text-[10px] text-gray-500 mt-0.5">{seasonName}</p>
+                      ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2 text-[10px] text-gray-600">
                       <span className="inline-flex items-center gap-1">
                         <Calendar size={12} className="text-gray-400 shrink-0" />
-                        {format(new Date(match.date), 'dd MMM yyyy · HH:mm', { locale: es })}
+                        {formatMatchDate(match, 'listMediumWithTime')}
                       </span>
                       {field?.name && (
                         <span className="text-gray-400 truncate max-w-full">{field.name}</span>

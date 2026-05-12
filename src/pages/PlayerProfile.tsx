@@ -9,9 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+import { formatDatePreset, formatMatchDate, getOpponentName, getSeasonName } from '@/lib/matchDisplayLabel';
+import { toOpponentMap, toSeasonMap } from '@/lib/entityIndex';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { 
@@ -74,6 +74,11 @@ export default function PlayerProfile() {
   const [selectedSeasonId, setSelectedSeasonId] = useState<string>('all');
   const [selectedMatchType, setSelectedMatchType] = useState<string>('all');
   const [attendanceView, setAttendanceView] = useState<'summary' | 'regularity'>('summary');
+
+  const opponentsList = React.useMemo(() => Object.values(opponents), [opponents]);
+  const seasonsList = React.useMemo(() => Object.values(seasons), [seasons]);
+  const opponentById = React.useMemo(() => toOpponentMap(opponentsList), [opponentsList]);
+  const seasonById = React.useMemo(() => toSeasonMap(seasonsList), [seasonsList]);
 
   useEffect(() => {
     const fetchPlayerData = async () => {
@@ -263,60 +268,80 @@ export default function PlayerProfile() {
     { name: 'Sin Respuesta', value: totalStats.noResponse, color: '#9CA3AF' }
   ].filter(d => d.value > 0);
 
-  const performanceData = stats
-    .filter(s => {
-      const match = matches[s.matchId];
-      const matchTypeMatches = selectedMatchType === 'all' || (match && match.type === selectedMatchType);
-      const seasonMatches = selectedSeasonId === 'all' || s.seasonId === selectedSeasonId;
-      return seasonMatches && matchTypeMatches && s.attendance === 'attending' && match?.status === 'completed';
-    })
-    .sort((a, b) => new Date(matches[a.matchId].date).getTime() - new Date(matches[b.matchId].date).getTime())
-    .map(s => {
-      const match = matches[s.matchId];
+  const { performanceData, maxScoringStreak } = React.useMemo(() => {
+    const data = stats
+      .filter((s) => {
+        const match = matches[s.matchId];
+        const matchTypeMatches = selectedMatchType === 'all' || (match && match.type === selectedMatchType);
+        const seasonMatches = selectedSeasonId === 'all' || s.seasonId === selectedSeasonId;
+        return seasonMatches && matchTypeMatches && s.attendance === 'attending' && match?.status === 'completed';
+      })
+      .sort((a, b) => new Date(matches[a.matchId].date).getTime() - new Date(matches[b.matchId].date).getTime())
+      .map((s) => {
+        const match = matches[s.matchId];
+        return {
+          date: formatMatchDate(match, 'chartNumeric'),
+          opponent: getOpponentName(opponentById, match.opponentId, 'Rival'),
+          goals: s.goals || 0,
+          assists: s.assists || 0,
+        };
+      });
+    let currentStreak = 0;
+    let maxStreak = 0;
+    data.forEach((row) => {
+      if (row.goals > 0) {
+        currentStreak++;
+        maxStreak = Math.max(maxStreak, currentStreak);
+      } else {
+        currentStreak = 0;
+      }
+    });
+    return { performanceData: data, maxScoringStreak: maxStreak };
+  }, [stats, matches, selectedMatchType, selectedSeasonId, opponentById]);
+
+  const allTeamMatches = React.useMemo(() => {
+    return Object.values(matches)
+      .filter((m) => {
+        const matchTypeMatches = selectedMatchType === 'all' || m.type === selectedMatchType;
+        const seasonMatches = selectedSeasonId === 'all' || m.seasonId === selectedSeasonId;
+        return seasonMatches && matchTypeMatches && m.status === 'completed';
+      })
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [matches, selectedMatchType, selectedSeasonId]);
+
+  const evolutionData = React.useMemo(() => {
+    return allTeamMatches.map((match, index) => {
+      const matchesUpToNow = allTeamMatches.slice(0, index + 1);
+      const currentRating = calculatePlayerRating(
+        matchesUpToNow,
+        injuries,
+        stats,
+        player,
+        selectedSeasonId,
+        seasonsList
+      );
+
       return {
-        date: format(new Date(match.date), 'dd/MM'),
-        opponent: opponents[match.opponentId]?.name || 'Rival',
-        goals: s.goals || 0,
-        assists: s.assists || 0,
+        date: formatMatchDate(match, 'chartNumeric'),
+        opponent: getOpponentName(opponentById, match.opponentId, 'Rival'),
+        baremo: currentRating.notaFinal,
+        desempeno: currentRating.notaDesempeno,
+        compromiso: currentRating.notaCompromiso,
+        round: match.round || '',
+        seasonName: getSeasonName(seasonById, match.seasonId, { missingLabel: '' }),
+        matchId: match.id,
       };
     });
-
-  // Calculate consecutive scoring streak
-  let currentScoringStreak = 0;
-  let maxScoringStreak = 0;
-
-  performanceData.forEach(match => {
-    if (match.goals > 0) {
-      currentScoringStreak++;
-      maxScoringStreak = Math.max(maxScoringStreak, currentScoringStreak);
-    } else {
-      currentScoringStreak = 0;
-    }
-  });
-
-  const allTeamMatches = Object.values(matches)
-    .filter(m => {
-      const matchTypeMatches = selectedMatchType === 'all' || m.type === selectedMatchType;
-      const seasonMatches = selectedSeasonId === 'all' || m.seasonId === selectedSeasonId;
-      return seasonMatches && matchTypeMatches && m.status === 'completed';
-    })
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-  const evolutionData = allTeamMatches.map((match, index) => {
-    const matchesUpToNow = allTeamMatches.slice(0, index + 1);
-    const currentRating = calculatePlayerRating(matchesUpToNow, injuries, stats, player, selectedSeasonId, Object.values(seasons));
-    
-    return {
-      date: format(new Date(match.date), 'dd/MM'),
-      opponent: opponents[match.opponentId]?.name || 'Rival',
-      baremo: currentRating.notaFinal,
-      desempeno: currentRating.notaDesempeno,
-      compromiso: currentRating.notaCompromiso,
-      round: match.round || '',
-      seasonName: seasons[match.seasonId]?.name || '',
-      matchId: match.id
-    };
-  });
+  }, [
+    allTeamMatches,
+    injuries,
+    stats,
+    player,
+    selectedSeasonId,
+    seasonsList,
+    seasonById,
+    opponentById,
+  ]);
 
   const shortPositions: Record<string, string> = {
     'Portero': 'POR',
@@ -599,7 +624,7 @@ export default function PlayerProfile() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Nacimiento</span>
-                    <span className="font-medium">{player.birthDate ? format(new Date(player.birthDate), 'dd/MM/yyyy') : 'N/A'}</span>
+                    <span className="font-medium">{player.birthDate ? formatDatePreset(player.birthDate, 'birthDateDisplay') : 'N/A'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">Edad</span>
@@ -917,24 +942,25 @@ export default function PlayerProfile() {
                             const match = matches[stat.matchId];
                             if (!match) return null;
                             const opponent = opponents[match.opponentId];
+                            const rivalName = getOpponentName(opponentById, match.opponentId, 'Desconocido');
                             
                             return (
                               <tr key={stat.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50 transition-colors">
                                 <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap text-sm">
-                                  {format(new Date(match.date), 'dd MMM yy', { locale: es })}
+                                  {formatMatchDate(match, 'listDayMonthShortYear')}
                                 </td>
                                 <td className="px-4 py-3">
                                   <div className="flex items-center gap-3">
                                     {opponent?.shieldUrl ? (
                                       <div className="w-8 h-8 bg-white rounded-full shadow-sm border border-gray-100 flex items-center justify-center p-1 shrink-0">
-                                        <img src={opponent.shieldUrl} alt={opponent.name} className="w-full h-full object-contain" />
+                                        <img src={opponent.shieldUrl} alt={rivalName} className="w-full h-full object-contain" />
                                       </div>
                                     ) : (
                                       <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center text-[10px] font-bold text-gray-400 shadow-sm border border-gray-100 shrink-0">
-                                        {opponent?.name?.substring(0, 2).toUpperCase() || '??'}
+                                        {rivalName.substring(0, 2).toUpperCase() || '??'}
                                       </div>
                                     )}
-                                    <span className="font-bold text-gray-700 text-sm">{opponent?.name || 'Desconocido'}</span>
+                                    <span className="font-bold text-gray-700 text-sm">{rivalName}</span>
                                   </div>
                                 </td>
                                 <td className="px-4 py-3">
@@ -1029,8 +1055,8 @@ export default function PlayerProfile() {
                                 {injury.endDate ? 'Recuperado' : 'Lesionado'}
                               </p>
                               <p className="text-[10px] text-gray-500 uppercase font-black tracking-wider">
-                                {format(new Date(injury.startDate), 'dd MMM yyyy HH:mm', { locale: es })}
-                                {injury.endDate && ` - ${format(new Date(injury.endDate), 'dd MMM yyyy HH:mm', { locale: es })}`}
+                                {formatDatePreset(injury.startDate, 'injuryDateTime')}
+                                {injury.endDate && ` - ${formatDatePreset(injury.endDate, 'injuryDateTime')}`}
                               </p>
                             </div>
                           </div>

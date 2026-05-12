@@ -22,8 +22,7 @@ import { uploadImage } from '../lib/imageUpload';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Label } from '@/components/ui/label';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { formatDatePreset, getSeasonName } from '@/lib/matchDisplayLabel';
 import {
   Dialog,
   DialogContent,
@@ -308,10 +307,10 @@ export default function OpponentManager({
                       <div key={match.id} className="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-2xl shadow-sm">
                         <div className="flex flex-col">
                           <span className="text-[10px] font-bold text-gray-400 uppercase">
-                            {format(new Date(match.date), "d 'de' MMMM, yyyy", { locale: es })}
+                            {formatDatePreset(match.date, 'opponentListSpanishDate')}
                           </span>
                           <span className="text-xs font-medium text-gray-500">
-                            {seasons.find(s => s.id === match.seasonId)?.name}
+                            {getSeasonName(seasons, match.seasonId, { missingLabel: '' })}
                           </span>
                         </div>
                         

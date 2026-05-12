@@ -33,8 +33,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ArrowLeft, Save, Trophy, Users, ShieldAlert, CheckCircle2, Stethoscope, XCircle, ShieldCheck, HelpCircle, AlertCircle, RotateCcw } from 'lucide-react';
 import { motion } from 'motion/react';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { formatMatchDate } from '@/lib/matchDisplayLabel';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { 
@@ -567,7 +566,7 @@ export default function MatchStats() {
                 {match.type === 'league' ? `Liga - J${match.round}` : match.type === 'cup' ? `Copa - ${match.round}` : 'Amistoso'}
               </p>
               <h2 className="text-lg font-black leading-tight">
-                {format(new Date(match.date), 'dd MMMM yyyy', { locale: es })}
+                {formatMatchDate(match, 'headerFull')}
               </h2>
               {season?.division && (
                 <p className="text-emerald-200 text-[9px] font-bold uppercase tracking-widest mt-1">

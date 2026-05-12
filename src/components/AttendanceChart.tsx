@@ -13,8 +13,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Users } from 'lucide-react';
 import { Match, PlayerStat, Season } from '../types';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { formatMatchDate, getSeasonName } from '@/lib/matchDisplayLabel';
 
 interface AttendanceChartProps {
   matches: Match[];
@@ -36,13 +35,11 @@ export default function AttendanceChart({ matches, stats, seasons, globalSeasonI
       const matchStats = stats.filter(s => s.matchId === match.id);
       const attendingCount = matchStats.filter(s => s.attendance === 'attending').length;
       
-      const season = seasons.find(s => s.id === match.seasonId);
-      
       return {
         name: `J${match.round || index + 1}`,
-        fullDate: format(new Date(match.date), "d MMM", { locale: es }),
+        fullDate: formatMatchDate(match, 'chartDay'),
         attending: attendingCount,
-        seasonName: season?.name || 'S/T',
+        seasonName: getSeasonName(seasons, match.seasonId, { missingLabel: 'S/T' }),
         matchId: match.id,
         date: match.date
       };

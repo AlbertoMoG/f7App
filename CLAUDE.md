@@ -19,18 +19,25 @@ npm run dev              # Servidor Vite en http://localhost:3000
 # Solo en Windows (primera vez — instala bindings nativos)
 npm run setup:win
 
-# Comprobación de tipos (no hay test runner; este es el paso de "lint")
+# Comprobación de tipos
 npm run lint             # tsc --noEmit
+
+# Tests unitarios (Vitest, lógica en src/lib)
+npm run test             # vitest run (CI-friendly)
+npm run test:watch       # vitest en modo watch
+
+# Lint + tests unitarios (sin emulador Firebase)
+npm run test:ci
 
 # Build de producción
 npm run build
 
 # Firebase
 npm run deploy:rules     # Publica las reglas de seguridad de Firestore
-npm run test:rules       # Ejecuta los tests de reglas de Firestore con el emulador
+npm run test:rules       # Tests de reglas con emulador (requiere JDK 21+ y firebase-tools)
 ```
 
-**No existen tests unitarios** para la lógica de negocio — `npm run lint` es la única validación automatizada.
+Los tests de reglas (`test:rules`) necesitan **Java 21+** para el emulador de Firestore. Los tests unitarios (`test`) solo requieren Node.
 
 ---
 
@@ -46,7 +53,7 @@ VITE_FIREBASE_APP_ID=
 VITE_FIREBASE_STORAGE_BUCKET=        # opcional
 VITE_FIREBASE_MESSAGING_SENDER_ID=   # opcional
 VITE_FIREBASE_FIRESTORE_DATABASE_ID= # opcional, para base de datos no predeterminada
-GEMINI_API_KEY=                       # opcional, para funciones de IA con Google Gemini
+VITE_GEMINI_API_KEY=                  # opcional; queda en el bundle público. Producción: Callable/proxy
 ```
 
 Se cargan y validan al arrancar en `src/config/env.ts` — la app lanza un error inmediatamente si falta alguna variable obligatoria.
@@ -68,6 +75,7 @@ Se cargan y validan al arrancar en `src/config/env.ts` — la app lanza un error
 | Fechas | date-fns 4 |
 | IA | Google Gemini (`@google/genai`) |
 | Exportación PDF/imagen | html2canvas, jspdf, jspdf-autotable |
+| Tests unitarios | Vitest 3 (`src/**/*.test.ts`) |
 
 Tailwind se configura mediante el plugin `@tailwindcss/vite` (no existe `tailwind.config.ts` separado). El alias de ruta `@/` apunta a `src/`.
 

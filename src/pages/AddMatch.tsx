@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Season, Opponent, MatchType, Match, Field } from '../types';
 import { isLeagueMatchCandidate } from '../lib/leagueStandingsAggregate';
 import { findConflictingLeagueLeg } from '../lib/leagueMatchLegValidation';
+import { getSeasonName } from '@/lib/matchDisplayLabel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,9 +15,10 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
-import { ArrowLeft, Calendar, Save } from 'lucide-react';
+import { ArrowLeft, Calendar, Save, Users, UserPlus } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
+import { EmptyStateCard } from '@/components/EmptyStateCard';
 
 interface AddMatchProps {
   seasons: Season[];
@@ -163,11 +165,65 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
     }
   };
 
-  // Prevenir renderizado hasta que los datos existan para evitar el bug del selector
-  if (seasons.length === 0 || opponents.length === 0) {
+  if (!isEditing && (seasons.length === 0 || opponents.length === 0)) {
+    if (seasons.length === 0) {
+      return (
+        <div className="min-h-screen bg-[#F5F5F0] flex items-center justify-center p-4">
+          <div className="w-full max-w-lg">
+            <EmptyStateCard
+              icon={Calendar}
+              title="Crea una temporada primero"
+              description="Para programar partidos necesitas al menos una temporada. Podrás asignar rivales y campos después."
+              primaryAction={{ label: 'Nueva temporada', to: '/seasons/new' }}
+              secondaryAction={{ label: 'Volver a partidos', to: '/matches' }}
+            />
+          </div>
+        </div>
+      );
+    }
     return (
-      <div className="min-h-screen bg-[#F5F5F0] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-emerald-600 border-t-transparent"></div>
+      <div className="min-h-screen bg-[#F5F5F0] flex items-center justify-center p-4">
+        <div className="w-full max-w-lg">
+          <EmptyStateCard
+            icon={UserPlus}
+            title="Añade rivales a tu equipo"
+            description="Ve a Ajustes → Rivales y equipos, crea al menos un rival y vuelve aquí. Si usas rivales por temporada, vincúlalos a la temporada elegida."
+            primaryAction={{ label: 'Ir al inicio', to: '/' }}
+            secondaryAction={{ label: 'Volver a partidos', to: '/matches' }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (isEditing && seasons.length === 0) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F0] flex items-center justify-center p-4">
+        <div className="w-full max-w-lg">
+          <EmptyStateCard
+            icon={Calendar}
+            title="No hay temporadas cargadas"
+            description="No se puede editar el partido sin datos de temporadas. Comprueba la conexión o crea una temporada."
+            primaryAction={{ label: 'Nueva temporada', to: '/seasons/new' }}
+            secondaryAction={{ label: 'Volver a partidos', to: '/matches' }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (isEditing && opponents.length === 0) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F0] flex items-center justify-center p-4">
+        <div className="w-full max-w-lg">
+          <EmptyStateCard
+            icon={Users}
+            title="No hay rivales cargados"
+            description="Añade rivales desde Ajustes para poder guardar cambios en el partido."
+            primaryAction={{ label: 'Ir al inicio', to: '/' }}
+            secondaryAction={{ label: 'Volver a partidos', to: '/matches' }}
+          />
+        </div>
       </div>
     );
   }
@@ -213,7 +269,7 @@ export default function AddMatch({ seasons, opponents, fields, matches, onAddMat
                       <SelectTrigger>
                         <SelectValue>
                           {seasonId 
-                            ? seasons.find(s => s.id === seasonId)?.name 
+                            ? getSeasonName(seasons, seasonId, { missingLabel: '—' })
                             : <span className="text-gray-400">Selecciona temporada</span>}
                         </SelectValue>
                       </SelectTrigger>
